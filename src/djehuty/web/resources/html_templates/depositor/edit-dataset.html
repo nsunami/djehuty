@@ -226,7 +226,12 @@ jQuery(document).ready(function (){
   <tbody></tbody>
 </table>
 
-<label>Licence Access</label>
+<label>Description</label><div class="fas fa-question-circle help-icon"><span class="help-text">Add as much context as possible so that others can interpret your research and reproduce it. Make sure you include methodology, techniques used, and if relevant information about approval for data collection to confirm adherence to legal or ethical requirements. The description should have at least four characters.</span></div><span class="required-field">&#8727;</span>
+<div id="description" class="texteditor">
+  {{article["description"] | default("", True) | replace("\\n", "<br>") | safe }}
+</div>
+
+<label>Licence &#38; Access</label>
 <div id="access-wrapper">
   <div id="access-type-wrapper" class="options-wrapper">
 <input type="radio" name="access_type" id="open_access" value="open" checked="checked" /><!--
