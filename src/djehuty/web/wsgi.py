@@ -309,6 +309,9 @@ class ApiServer:
             R("/v3/profile/picture",                                             self.api_v3_profile_picture),
             R("/v3/profile/picture/<account_uuid>",                              self.api_v3_profile_picture_for_account),
             R("/v3/tags/search",                                                 self.api_v3_tags_search),
+            R("/v3/datasets/<dataset_uuid>/collaborators",                       self.api_v3_dataset_collaborators),
+            R("/v3/datasets/<dataset_uuid>/collaborators/<collaborator_uuid>",   self.api_v3_dataset_remove_collaborator),
+
 
             ## Data model exploratory
             ## ----------------------------------------------------------------
@@ -1991,6 +1994,90 @@ class ApiServer:
         self.db.delete_session_by_uuid (account_uuid, session_uuid)
         return response
 
+    def api_v3_dataset_collaborators(self, request, dataset_uuid):
+        """Implements /v3/datasets/dataset_uuid/collaborator"""
+        # 1. Formulier maken <check>
+        # 1.b contributors worden collaborators <check>
+        # 2. Formulier stukje -add collaborator- knop info opvangen <check>
+        # 3. Die info opslaan in de database
+        # 4. Dan; hoe halen we die info weer op" (in aparte .sparql query)
+        # zodat je die tabel hebt met de bestaande collaborators
+        # 5. Daarna toepassen van de RWX / RBAC
+
+        if not self.accepts_json (request):
+            return self.error_406 ("application/json")
+
+        account_uuid = self.account_uuid_from_request (request)
+        if account_uuid is None:
+            return self.error_authorization_failed (request)
+
+        if not validator.is_valid_uuid (dataset_uuid):
+            return self.error_404 (request)
+
+        try:
+            dataset = self.db.datasets(container_uuid=dataset_uuid,
+                                       account_uuid=account_uuid,
+                                       is_published=None,
+                                       is_latest=None,
+                                       limit=1)[0]
+        except IndexError:
+            return self.error_403(request)
+
+        if dataset is None:
+           return self.error_403 (request)
+
+        if request.method == "GET":
+            collaborators =  self.db.collaborators (dataset["uuid"])
+            return self.default_list_response (collaborators, formatter.format_collaborator_record)
+
+        if request.method == "POST":
+            parameters = request.get_json()
+            self.log.info("parameters:%s", parameters)
+            #later: dict validatie
+            metadata = parameters["metadata"]
+           # data = parameters["data"]
+            collaborator = validator.string_value(parameters, "collaborator")
+
+            collaboratorz = self.db.insert_collaborator (dataset["uuid"],
+                                         metadata["read"],
+                                         metadata["edit"],
+                                         metadata["remove"],
+                                         collaborator)
+
+            if collaboratorz is None:
+                self.log.error ("Inserting collaborator failed. ")
+
+            self.log.info("Collaborators: %s", collaboratorz)
+
+            return self.respond_205()
+
+    def api_v3_dataset_remove_collaborator(self, request, dataset_uuid, collaborator_uuid):
+        """Removes the collaborator from the share section of edit dataset form."""
+        if not self.accepts_json(request):
+            return self.error_406("application/json")
+
+        account_uuid = self.account_uuid_from_request(request)
+        if account_uuid is None:
+            return self.error_authorization_failed(request)
+
+        if not validator.is_valid_uuid(dataset_uuid):
+            return self.error_404(request)
+
+        if not validator.is_valid_uuid(collaborator_uuid):
+            return self.error_404(request)
+
+        dataset = self.db.datasets(container_uuid=dataset_uuid,
+                                     account_uuid=account_uuid,
+                                     is_published=False,
+                                     is_latest=None,
+                                     limit=1)
+        if len(dataset) != 1:
+            return self.error_403(request)g
+
+        if self.db.remove_collaborator(dataset[0]["uuid"], collaborator_uuid) is None:
+            return self.error_500()
+        return self.respond_204()
+
     def ui_dataset_new_private_link (self, request, dataset_uuid):
         """Implements /my/datasets/<uuid>/private_link/new."""
         if not self.accepts_html (request):
@@ -2073,21 +2160,7 @@ class ApiServer:
         self.locks.unlock (locks.LockTypes.PRIVATE_LINKS)
         return redirect (f"/my/collections/{collection_uuid}/private_links", code=302)
 
-    def __delete_private_link (self, request, item, account_uuid, private_link_id):
-        """Deletes the private link for ITEM and responds appropriately."""
-        if not item:
-            return self.error_403 (request)
 
-        response = redirect (request.referrer, code=302)
-        self.locks.lock (locks.LockTypes.PRIVATE_LINKS)
-        if self.db.delete_private_links (item["container_uuid"],
-                                         account_uuid,
-                                         private_link_id) is None:
-            self.locks.unlock (locks.LockTypes.PRIVATE_LINKS)
-            return self.error_500()
-
-        self.locks.unlock (locks.LockTypes.PRIVATE_LINKS)
-        return response
 
     def ui_dataset_delete_private_link (self, request, dataset_uuid, link_id):
         """Implements /my/datasets/<uuid>/private_link/<pid>/delete."""

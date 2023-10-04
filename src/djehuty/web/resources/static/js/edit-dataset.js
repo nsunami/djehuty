@@ -68,6 +68,53 @@ function preview_dataset (dataset_uuid, event) {
     });
 }
 
+function toggle_share_form (dataset_uuid, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    let share_div = jQuery("#share-form");
+    if (share_div.is(":visible")) {
+        jQuery("#share-form").slideUp(150, function (){
+            jQuery("#share").text("Share");
+        });
+    } else {
+        jQuery("#share-form").slideDown(150, function (){
+            jQuery("#share").text("Cancel share");
+            render_collaborators_for_dataset(dataset_uuid);
+        });
+    }
+}
+
+function gather_share_form_data (event) {
+
+}
+
+function share_dataset (dataset_uuid, event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    save_dataset (dataset_uuid, event, false, function() {
+        jQuery.ajax({
+            url:         `/v2/account/articles/${dataset_uuid}/private_links`,
+            type:        "POST",
+            contentType: "application/json",
+            accept:      "application/json",
+            data:        JSON.stringify({ "expires_date": `${year}-${month}-${day}` }),
+        }).done(function (data) {
+            let preview_window = window.open(data["location"], '_blank');
+            if (preview_window) { preview_window.focus(); }
+            else {
+                show_message ("failure",
+                              "<p>Cannot open preview window because your " +
+                              "browser disabled pop-ups.</p>");
+            }
+        }).fail(function (response, text_status, error_code) {
+            show_message ("failure",
+                          `<p>Could not create a private link due to error ` +
+                          `<code>${error_code}</code>.</p>`);
+        });
+    });
+}
+
 function gather_form_data () {
     let categories   = jQuery("input[name='categories']:checked");
     let category_ids = []
@@ -280,6 +327,89 @@ function render_references_for_dataset (dataset_uuid) {
     }).fail(function () {
         show_message ("failure", "<p>Failed to retrieve references.</p>");
     });
+}
+
+function render_collaborators_for_dataset (dataset_uuid) {
+    jQuery.ajax({
+        url:         `/v3/datasets/${dataset_uuid}/collaborators`,
+        data:        { "limit": 10000, "order": "asc", "order_direction": "id" },
+        type:        "GET",
+        accept:      "application/json",
+    }).done(function (collaborators) { console.log("Werkt?")
+        jQuery("#collaborators-form tbody").empty();
+        let row ='<tr>';
+            row += '<td><input type="text" id="add_collaborator" name="add_collaborator" value=""/></td>';
+            row += '<td><input class="subitem-checkbox-metadata" name="read" type="checkbox"></td>';
+            row += '<td><input class="subitem-checkbox-metadata" name="edit" type="checkbox"></td>';
+            row += '<td><input class="subitem-checkbox-metadata" name="remove" type="checkbox"></td>';
+            row += '<td><input class="subitem-checkbox-dataset" name="read" type="checkbox"></td>';
+            row += '<td><input class="subitem-checkbox-dataset" name="edit" type="checkbox"></td>';
+            row += '<td><input class="subitem-checkbox-dataset" name="remove" type="checkbox"></td>';
+            row += '<td><a id="add-collaborator-button" class="form-button corporate-identity-standard-button" href="#">Add ';
+            row += 'collaborator</a></td>';
+            row += '</tr>';
+        jQuery("#collaborators-form tbody").append(row);
+        jQuery("#add-collaborator-button").on("click", function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            add_collaborator(dataset_uuid);
+        });
+        for (let collaborator of collaborators) {
+            let row = `<tr><td>`;
+            row += `${collaborator.name}</td>`;
+            row += '<td><input name="read" type="checkbox" disabled="disabled"' ;
+            row += collaborator.metadata_read ? 'checked="checked"' : '';
+            row += `></td><td><input name="edit" type="checkbox" disabled="disabled"></td>`;
+            row += `<td><input name="remove" type="checkbox" disabled="disabled"></td>`;
+            row += `<td><input name="read" type="checkbox" disabled="disabled"></td>`;
+            row += `<td><input name="edit" type="checkbox" disabled="disabled"></td>`;
+            row += `<td><input name="remove" type="checkbox" disabled="disabled"></td>`;
+            row += `<td><a href="#" `;
+            row += `onclick="javascript:remove_collaborator('${encodeURIComponent(collaborator.uuid)}', `;
+            row += `'${dataset_uuid}'); return false;" class="fas fa-trash-can" `;
+            row += `title="Remove"></a></td></tr>`;
+            jQuery("#collaborators-form tbody").append(row);
+        }
+        jQuery("#collaborators-form").show();
+    }).fail(function () {
+        show_message ("failure", "<p>Failed to retrieve collaborators.</p>");
+    });
+}
+
+function add_collaborator (dataset_uuid) {
+    let form_data= {
+        "metadata": {
+            "read": jQuery("input[name='read'].subitem-checkbox-metadata").prop("checked"),
+            "edit": jQuery("input[name='edit'].subitem-checkbox-metadata").prop("checked"),
+            "remove": jQuery("input[name='remove'].subitem-checkbox-metadata").prop("checked"),
+        },
+        "dataset": {
+            "read": jQuery("input[name='read'].subitem-checkbox-dataset").prop("checked"),
+            "edit": jQuery("input[name='edit'].subitem-checkbox-dataset").prop("checked"),
+            "remove": jQuery("input[name='remove'].subitem-checkbox-dataset").prop("checked"),
+        },
+        "collaborator": or_null(jQuery("#add_collaborator").val())
+    }
+
+    jQuery.ajax({
+        url:         `/v3/datasets/${dataset_uuid}/collaborators`,
+        type:        "POST",
+        contentType: "application/json",
+        accept:      "application/json",
+        data:        JSON.stringify(form_data),
+    }).done(function () {
+        render_collaborators_for_dataset(dataset_uuid);
+        jQuery("#add_collaborator").val("");
+    }).fail(function () { show_message ("failure", `<p>Failed to add ${url}.</p>`); });
+}
+
+function remove_collaborator (collaborator_uuid, dataset_uuid) {
+    jQuery.ajax({
+        url:         `/v3/datasets/${dataset_uuid}/collaborators/${collaborator_uuid}`,
+        type:        "DELETE",
+        accept:      "application/json",
+    }).done(function () { render_collaborators_for_dataset (dataset_uuid); console.log("Collaborator is removed, toch?") })
+      .fail(function () { show_message ("failure", `<p>Failed to remove ${collaborator_uuid}</p>`); });
 }
 
 function render_tags_for_dataset (dataset_uuid) {
@@ -714,6 +844,12 @@ function activate (dataset_uuid) {
             event.stopPropagation();
             add_reference (dataset_uuid);
         });
+         jQuery("#collaborators").on("keypress", function(e){
+            if(e.which == 13){
+                add_collaborator(dataset_uuid);
+            }
+        });
+
         jQuery("#repair-md5s").on("click", function(event) {
             event.preventDefault();
             event.stopPropagation();
@@ -734,6 +870,68 @@ function activate (dataset_uuid) {
                 add_tag(dataset_uuid);
             }
         });
+        jQuery(".subitem-checkbox-metadata").on("change", function (event) {
+            let read = jQuery(".subitem-checkbox-metadata[name='read']").prop("checked");
+            let edit = jQuery(".subitem-checkbox-metadata[name='edit']").prop("checked");
+            let remove = jQuery(".subitem-checkbox-metadata[name='remove']").prop("checked");
+
+            if (remove) {
+                jQuery(".subitem-checkbox-metadata[name='edit']").prop("checked", true);
+                edit = true;
+                jQuery(".subitem-checkbox-metadata[name='read']").prop("checked", true);
+                read = true;
+            } else if (edit) {
+                jQuery(".subitem-checkbox-metadata[name='read']").prop("checked", true);
+                read = true;
+                // .attr("disabled", true)
+            }
+            if (remove) {
+                jQuery(".subitem-checkbox-metadata[name='edit']").attr("disabled", true);
+                jQuery(".subitem-checkbox-metadata[name='read']").attr("disabled", true);
+            } else {
+                jQuery(".subitem-checkbox-metadata[name='edit']").attr("disabled", false);
+                jQuery(".subitem-checkbox-metadata[name='read']").attr("disabled", true);
+
+            }
+            if (edit) {
+                jQuery(".subitem-checkbox-metadata[name='read']").attr("disabled", true);
+            } else {
+                jQuery(".subitem-checkbox-metadata[name='read']").attr("disabled", false);
+            }
+         });
+
+         jQuery(".subitem-checkbox-dataset").on("change", function (event) {
+            let read = jQuery(".subitem-checkbox-dataset[name='read']").prop("checked");
+            let edit = jQuery(".subitem-checkbox-dataset[name='edit']").prop("checked");
+            let remove = jQuery(".subitem-checkbox-dataset[name='remove']").prop("checked");
+
+            if (remove) {
+                jQuery(".subitem-checkbox-dataset[name='edit']").prop("checked", true);
+                edit = true;
+                jQuery(".subitem-checkbox-dataset[name='read']").prop("checked", true);
+                read = true;
+            } else if (edit) {
+                jQuery(".subitem-checkbox-dataset[name='read']").prop("checked", true);
+                read = true;
+            }
+            if (remove) {
+                jQuery(".subitem-checkbox-dataset[name='edit']").attr("disabled", true);
+                jQuery(".subitem-checkbox-dataset[name='read']").attr("disabled", true);
+            } else {
+                jQuery(".subitem-checkbox-dataset[name='edit']").attr("disabled", false);
+                jQuery(".subitem-checkbox-dataset[name='read']").attr("disabled", true);
+            }
+            if (edit) {
+                jQuery(".subitem-checkbox-dataset[name='read']").attr("disabled", true);
+            } else {
+                jQuery(".subitem-checkbox-dataset[name='read']").attr("disabled", false);
+            }
+         });
+
+        // if collaborator text field contains value: metadata & dataset class get 'required'
+
+
+
         render_files_for_dataset (dataset_uuid, null);
         if (data["defined_type_name"] != null) {
             jQuery(`#type-${data["defined_type_name"]}`).prop("checked", true);
@@ -843,6 +1041,8 @@ function activate (dataset_uuid) {
         jQuery("#publish").on("click", function (event) { publish_dataset (dataset_uuid, event); });
         jQuery("#decline").on("click", function (event) { decline_dataset (dataset_uuid, event); });
         jQuery("#preview").on("click", function (event) { preview_dataset (dataset_uuid, event); });
+        jQuery("#share").on("click", function (event) { toggle_share_form (dataset_uuid, event); });
+
         jQuery("#refresh-git-files").on("click", function (event) {
             render_git_files_for_dataset (dataset_uuid, event);
             render_git_branches_for_dataset (dataset_uuid, event);

@@ -30,6 +30,7 @@ jQuery(document).ready(function (){
 <link href="/static/css/dropzone.min.css" rel="stylesheet">
 <link href="/static/css/form.css" rel="stylesheet">
 <style>
+#share-form {display: none}
 .upload-wrapper { text-align: center; }
 .upload-container {
     display: block;
@@ -45,6 +46,7 @@ jQuery(document).ready(function (){
 .upload-container:hover { cursor: pointer; }
 .upload-container p { font-size: 1.2em; }
 .file-incomplete-warning { font-style: italic; color: red; }
+#collaborators-form input[type="text"] {max-width:200px}
 #file { display: none; }
 #expanded-categories { display: none; }
 .files td { text-align: left; }
@@ -139,6 +141,8 @@ jQuery(document).ready(function (){
   {%- endif %}
   <li class="hide-for-javascript delete-button"><a id="delete" href="#">Delete</a>
   <li class="hide-for-javascript preview-button"><a id="preview" href="#">Preview</a>
+  <li class="hide-for-javascript share-button"><a id="share" href="#">Share</a>
+
 </ul>
 {% endblock %}
 {% block body %}
@@ -149,14 +153,70 @@ jQuery(document).ready(function (){
 {%- else %}
 <h1>Edit dataset</h1>
 {%- endif %}
+
 <noscript>
   <p class="no-script">Sorry, this page requires JavaScript to work correctly.</p>
 </noscript>
 <div class="hide-for-javascript">
 <h2>Dataset details</h2>
 <p>Fields marked with <span class="required-field">&#8727;</span> are required.</p>
+<div id="share-form">
+<div id="collaborators-wrapper">
+<div id="collaborators-type-wrapper" class="options-wrapper">
+<input type="radio" name="collaborators" id="collaborators" checked="checked" /><!--
+--><label for="collaborators" class="no-head">Collaborators</label><!--
+--><input type="radio" name="supervisor" id="supervisor"  /><!--
+--><label for="supervisor" class="no-head">Supervisor</label>
+  <div class="input-with-button">
+    <table id="collaborators-form" class="corporate-identity-table">
+      <thead>
+        <tr>
+          <th colspan="1" scope="colgroup">Collaborator</th>
+          <th colspan="3" scope="colgroup">Metadata</th>
+          <th colspan="3" scope="colgroup">Dataset</th>
+          <th colspan="1" scope="colgroup">Add/Remove</th>
+        </tr>
+        <tr>
+          <th scope="col"></th>
+          <th scope="col">Read </th>
+          <th scope="col">Edit</th>
+          <th scope="col">Delete</th>
+          <th scope="col">Read</th>
+          <th scope="col">Edit</th>
+          <th scope="col">Delete</th>
+          <th scope="col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><input type="text" id="add_collaborator" name="add_collaborator" value="" /></td>
+          <td><input class="subitem-checkbox-metadata" name="read" type="checkbox"></td>
+          <td><input class="subitem-checkbox-metadata" name="edit" type="checkbox"></td>
+          <td><input class="subitem-checkbox-metadata" name="remove" type="checkbox"></td>
+          <td><input class="subitem-checkbox-dataset" name="read" type="checkbox"></td>
+          <td><input class="subitem-checkbox-dataset" name="edit" type="checkbox"></td>
+          <td><input class="subitem-checkbox-dataset" name="remove" type="checkbox"></td>
+          <td><a id="add-collaborator-button" class="form-button corporate-identity-standard-button" href="#">Add collaborator</a></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+<table class="inside-form-table" id="collaborators-list">
+  <thead>
+  </thead>
+  <tbody>
+  </tbody>
+</table>
+</div>
+<div class="supervisor" id="read_supervisor_form">
+  <p>
+    The head of your research group has access rights by default.
+  </p>
+</div>
+</div>
+</div>
 <label for="title">Title</label><div class="fas fa-question-circle help-icon"><span class="help-text">Give your research a title that is more descriptive than just a file name. This will help making your items discoverable via search engines such as Google. The title should have at least three characters.</span></div><span class="required-field">&#8727;</span>
-<input type="text" id="title" name="title" value="{{article["title"]}}" />
+<input type="text" id="title" name="title" value="{{article['title']}}" />
 <label for="authors">Authors</label><div class="fas fa-question-circle help-icon"><span class="help-text">Select authors from the list or manually add them by creating a new author record. Hit enter after adding each author and drag and drop names to arrange them in the order you wish.</span></div><span class="required-field">&#8727;</span>
 <input type="text" id="authors" name="authors" />
 <table class="inside-form-table multi-list" id="authors-list">
@@ -165,11 +225,8 @@ jQuery(document).ready(function (){
   </thead>
   <tbody></tbody>
 </table>
-<label>Description</label><div class="fas fa-question-circle help-icon"><span class="help-text">Add as much context as possible so that others can interpret your research and reproduce it. Make sure you include methodology, techniques used, and if relevant information about approval for data collection to confirm adherence to legal or ethical requirements. The description should have at least four characters.</span></div><span class="required-field">&#8727;</span>
-<div id="description" class="texteditor">
-  {{article["description"] | default("", True) | replace("\\n", "<br>") | safe }}
-</div>
-<label>Licence &#38; Access</label>
+
+<label>Licence Access</label>
 <div id="access-wrapper">
   <div id="access-type-wrapper" class="options-wrapper">
 <input type="radio" name="access_type" id="open_access" value="open" checked="checked" /><!--
@@ -191,14 +248,14 @@ jQuery(document).ready(function (){
   <div class="access_level" id="embargoed_access_form">
     <p>
       Embargo is a period during which a dataset is unavailable and not accessible to anyone else.
-      Please enter the end date of the embargo period and add the reason why the files are under embargo.  
+      Please enter the end date of the embargo period and add the reason why the files are under embargo.
     </p>
     <label for="license_embargoed" class="inner-head">Licence</label><div class="fas fa-question-circle help-icon"><span class="help-text">Select the appropriate licence from the list. Need to know more? Read our <a target="_blank" rel="noopener noreferrer" href="https://data.4tu.nl/info/en/use/publish-cite/upload-your-data-in-our-data-repository/licencing">guidance</a> for more information on the licence types we offer.</span></div><span class="required-field"> &#8727;</span>
     <select id="license_embargoed" class="license-selector" name="license">
       <option value="" disabled selected>Select a licence</option>
     </select>
     <label for="embargo_until_date" class="inner-head">Until date</label><span class="required-field"> &#8727;</span>
-    <input id="embargo_until_date" type="date" name="embargo_until_date" value="{{article["embargo_until_date"]}}" />
+    <input id="embargo_until_date" type="date" name="embargo_until_date" value="{{article['embargo_until_date']}}" />
     <label class="inner-head">Embargo type</label><span class="required-field"> &#8727;</span>
     <div id="record-type-wrapper" class="options-wrapper">
       <input type="radio" name="embargo_type" id="files_only_embargo" value="file" /><!--

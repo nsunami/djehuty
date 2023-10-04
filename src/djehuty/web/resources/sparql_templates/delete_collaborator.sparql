@@ -1,0 +1,26 @@
+{% extends "prefixes.sparql" %}
+{% block query %}
+DELETE {
+  GRAPH <{{state_graph}}> {
+    ?collaborator_uri  djht:dataset             ?dataset_uri .
+    ?collaborator_uri  rdf:type                 djht:Collaborator .
+    ?collaborator_uri  djht:metadata_read       ?metadata_read .
+    ?collaborator_uri  djht:metadata_edit       ?metadata_edit .
+    ?collaborator_uri  djht:metadata_remove     ?metadata_remove .
+    ?collaborator_uri  djht:name                ?name .
+  }
+}
+WHERE {
+  GRAPH <{{state_graph}}> {
+    ?collaborator_uri  djht:dataset             ?dataset_uri .
+    ?collaborator_uri  rdf:type                 djht:Collaborator .
+    ?collaborator_uri  djht:metadata_read       ?metadata_read .
+    ?collaborator_uri  djht:metadata_edit       ?metadata_edit .
+    ?collaborator_uri  djht:metadata_remove     ?metadata_remove .
+    ?collaborator_uri  djht:name                ?name .
+  }
+
+FILTER (?dataset_uri = <dataset:{{dataset_uuid}}>)
+FILTER (?collaborator_uri = <collaborator:{{collaborator_uuid}}>)
+}
+{% endblock %}
