@@ -57,7 +57,7 @@ class SparqlInterface:
     def __log_query (self, query, prefix="Query"):
         self.log.info ("%s:\n---\n%s\n---", prefix, query)
 
-    def __normalize_binding (self, record):
+    def __normalize_binding (self, record, variables=None):
         for item in record:
             if "datatype" in record[item]:
                 datatype = record[item]["datatype"]
@@ -88,6 +88,15 @@ class SparqlInterface:
                 record[item] = str(record[item]["value"])
             else:
                 self.log.info ("Not a typed-literal: %s", record[item]['type'])
+
+        # Optional bindings may be missing from the results.
+        # Add them here.
+        if isinstance(variables, list):
+            for key in variables:
+                if key not in record:
+                    self.log.info ("Added key to resultset: '%s'", key)
+                    record[key] = None
+
         return record
 
     def __normalize_orcid (self, orcid):
@@ -134,7 +143,13 @@ class SparqlInterface:
                 query_results = self.sparql.query().convert()
                 # Almost all query types return 'results'.
                 if "results" in query_results:
-                    results = list(map(self.__normalize_binding,
+                    variables = None
+                    try:
+                        variables = query_results["head"]["vars"]
+                    except KeyError:
+                        pass
+
+                    results = list(map(lambda bindings: self.__normalize_binding (bindings, variables),
                                        query_results["results"]["bindings"]))
                 # ASK queries don't result 'results' but 'boolean' instead.
                 elif "boolean" in query_results:
