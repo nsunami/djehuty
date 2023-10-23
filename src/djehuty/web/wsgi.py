@@ -2776,7 +2776,7 @@ class ApiServer:
                          'views'    : value_or(dataset, 'total_views'    , 0),
                          'shares'   : value_or(dataset, 'total_shares'   , 0),
                          'cites'    : value_or(dataset, 'total_cites'    , 0)}
-        statistics    = {key:val for (key,val) in statistics.items() if val > 0}
+        statistics    = {key:val for (key,val) in statistics.items() if (val is not None and val > 0)}
         member = value_or (group_to_member, value_or_none (dataset, "group_id"), 'other')
         member_url_name = member_url_names[member]
         tags = { t['tag'] for t in tags }
