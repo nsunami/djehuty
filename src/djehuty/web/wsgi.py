@@ -7402,6 +7402,9 @@ class ApiServer:
     def parse_contributors (self, text):
         """Procedure to split contributors by semicolon."""
         contributors = []
+        if not isinstance(text, str):
+            return contributors
+
         for contributor in text.split(';\n'):
             if contributor:
                 parts = contributor.split(' [orcid:', 1)
