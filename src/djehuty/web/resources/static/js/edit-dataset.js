@@ -356,7 +356,7 @@ function render_collaborators_for_dataset (dataset_uuid) {
         });
         for (let collaborator of collaborators) {
             let row = `<tr><td>`;
-            row += `${collaborator.name}</td>`;
+            row += `${collaborator.first_name} ${collaborator.last_name} (${collaborator.email})</td>`;
             row += '<td><input name="read" type="checkbox" disabled="disabled"' ;
             row += collaborator.metadata_read ? 'checked="checked"' : '';
             row += `></td><td><input name="edit" type="checkbox" disabled="disabled"></td>`;
@@ -388,7 +388,7 @@ function add_collaborator (dataset_uuid) {
             "edit": jQuery("input[name='edit'].subitem-checkbox-dataset").prop("checked"),
             "remove": jQuery("input[name='remove'].subitem-checkbox-dataset").prop("checked"),
         },
-        "collaborator": or_null(jQuery("#add_collaborator").val())
+        "email": or_null(jQuery("#add_collaborator").val())
     }
 
     jQuery.ajax({
@@ -400,7 +400,7 @@ function add_collaborator (dataset_uuid) {
     }).done(function () {
         render_collaborators_for_dataset(dataset_uuid);
         jQuery("#add_collaborator").val("");
-    }).fail(function () { show_message ("failure", `<p>Failed to add ${url}.</p>`); });
+    }).fail(function () { show_message ("failure", `<p>Failed to add collaborator.</p>`); });
 }
 
 function remove_collaborator (collaborator_uuid, dataset_uuid) {

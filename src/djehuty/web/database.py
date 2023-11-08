@@ -966,6 +966,7 @@ class SparqlInterface:
 
         item_uri = item if isinstance (item, URIRef) else rdf.uuid_to_uri (item, item_type)
 
+        rdf.add (rdf_store, blank_node, RDF.type, RDF.List, "url")
         rdf.add (rdf_store, blank_node, RDF.first, URIRef(item_uri), "url")
         rdf.add (rdf_store, blank_node, RDF.rest, RDF.nil, "url")
         if index is not None:
@@ -1548,7 +1549,7 @@ class SparqlInterface:
 
         return self.__run_query(query)
 
-    def insert_collaborator (self, dataset_uuid, metadata_read, metadata_edit, metadata_remove, name):
+    def insert_collaborator (self, dataset_uuid, collaborator_account_uuid, account_uuid, metadata_read, metadata_edit, metadata_remove):
         """Procedure to add a collaborator to the state graph. Part of RBAC"""
 
         graph      = Graph()
@@ -1559,16 +1560,32 @@ class SparqlInterface:
         rdf.add (graph, collaborator_uri, rdf.DJHT["metadata_read"],             metadata_read,     XSD.boolean)
         rdf.add (graph, collaborator_uri, rdf.DJHT["metadata_edit"],             metadata_edit,     XSD.boolean)
         rdf.add (graph, collaborator_uri, rdf.DJHT["metadata_remove"],           metadata_remove,   XSD.boolean)
-        rdf.add (graph, collaborator_uri, rdf.DJHT["name"],                      name,      XSD.string)
-        rdf.add (graph, collaborator_uri, rdf.DJHT["dataset"],                   rdf.uuid_to_uri(dataset_uuid, "dataset"),  "uri")
+        rdf.add (graph, collaborator_uri, rdf.DJHT["account"],                   rdf.uuid_to_uri(collaborator_account_uuid, "account"),  "uri")
 
         # toevoegen wie de collaborators heeft toegevoegd
         # datum van wanneer de collaborators zijn toegevoegd
 
         if self.add_triples_from_graph (graph):
-            return rdf.uri_to_uuid (collaborator_uri)
+            existing_collaborators = self.collaborators (dataset_uuid)
+            if existing_collaborators:
+                last_collaborator = existing_collaborators [-1]
+                last_node = conv.value_or_none(last_collaborator, "originating_blank_node")
+                new_index = conv.value_or (last_collaborator, "order_index", 0) +1
+                new_node = self.wrap_in_blank_node(collaborator_uri, index=new_index)
 
+                if self.append_to_list(last_node, new_node):
+                    return rdf.uri_to_uuid (collaborator_uri)
+
+                self.log.error ("failed to append %s to list of collaborators ", collaborator_uri)
+                return None
+
+            collaborators = [URIRef(collaborator_uri)]
+            if self.update_item_list (dataset_uuid, account_uuid, collaborators, "collaborators"):
+                return rdf.uri_to_uuid (collaborator_uri)
+
+            self.log.error("failed to create collaborator list for %s ", collaborator_uri)
         return None
+
 
     def remove_collaborator (self, dataset_uuid, collaborator_uuid):
         "Procedure to remove a collaborator from the state graph. Part of RBAC"

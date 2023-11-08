@@ -2040,18 +2040,23 @@ class ApiServer:
             #later: dict validatie
             metadata = parameters["metadata"]
            # data = parameters["data"]
-            collaborator = validator.string_value(parameters, "collaborator")
+            email = validator.string_value(parameters, "email")
 
-            collaboratorz = self.db.insert_collaborator (dataset["uuid"],
-                                         metadata["read"],
-                                         metadata["edit"],
-                                         metadata["remove"],
-                                         collaborator)
+            account = self.db.account_by_email(email)
+            if account is None:
+                self.log.error("Requesting email failed. ")
 
-            if collaboratorz is None:
+            collaborators = self.db.insert_collaborator (dataset["uuid"],
+                                                         account["uuid"],
+                                                         account_uuid,
+                                                         metadata["read"],
+                                                         metadata["edit"],
+                                                         metadata["remove"],
+                                                         )
+
+            if collaborators is None:
                 self.log.error ("Inserting collaborator failed. ")
-
-            self.log.info("Collaborators: %s", collaboratorz)
+                return self.error_500()
 
             return self.respond_205()
 
@@ -2076,7 +2081,7 @@ class ApiServer:
                                      is_latest=None,
                                      limit=1)
         if len(dataset) != 1:
-            return self.error_403(request)g
+            return self.error_403(request)
 
         if self.db.remove_collaborator(dataset[0]["uuid"], collaborator_uuid) is None:
             return self.error_500()
