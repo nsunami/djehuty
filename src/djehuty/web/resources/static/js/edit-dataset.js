@@ -342,9 +342,9 @@ function render_collaborators_for_dataset (dataset_uuid) {
             row += '<td><input class="subitem-checkbox-metadata" name="read" type="checkbox"></td>';
             row += '<td><input class="subitem-checkbox-metadata" name="edit" type="checkbox"></td>';
             row += '<td><input class="subitem-checkbox-metadata" name="remove" type="checkbox"></td>';
-            row += '<td><input class="subitem-checkbox-dataset" name="read" type="checkbox"></td>';
-            row += '<td><input class="subitem-checkbox-dataset" name="edit" type="checkbox"></td>';
-            row += '<td><input class="subitem-checkbox-dataset" name="remove" type="checkbox"></td>';
+            row += '<td><input class="subitem-checkbox-data" name="read" type="checkbox"></td>';
+            row += '<td><input class="subitem-checkbox-data" name="edit" type="checkbox"></td>';
+            row += '<td><input class="subitem-checkbox-data" name="remove" type="checkbox"></td>';
             row += '<td><a id="add-collaborator-button" class="form-button corporate-identity-standard-button" href="#">Add ';
             row += 'collaborator</a></td>';
             row += '</tr>';
@@ -357,14 +357,19 @@ function render_collaborators_for_dataset (dataset_uuid) {
         for (let collaborator of collaborators) {
             let row = `<tr><td>`;
             row += `${collaborator.first_name} ${collaborator.last_name} (${collaborator.email})</td>`;
-            row += '<td><input name="read" type="checkbox" disabled="disabled"' ;
-            row += collaborator.metadata_read ? 'checked="checked"' : '';
-            row += `></td><td><input name="edit" type="checkbox" disabled="disabled"></td>`;
-            row += `<td><input name="remove" type="checkbox" disabled="disabled"></td>`;
-            row += `<td><input name="read" type="checkbox" disabled="disabled"></td>`;
-            row += `<td><input name="edit" type="checkbox" disabled="disabled"></td>`;
-            row += `<td><input name="remove" type="checkbox" disabled="disabled"></td>`;
-            row += `<td><a href="#" `;
+            row += '<td><input name="read" type="checkbox" disabled="disabled"';
+            row += collaborator.metadata_read ? ' checked="checked"' : '';
+            row += '></td><td><input name="edit" type="checkbox" disabled="disabled"';
+            row += collaborator.metadata_edit ? ' checked="checked"' : '';
+            row += '></td><td><input name="remove" type="checkbox" disabled="disabled"';
+            row += collaborator.metadata_remove ? ' checked="checked"' : '';
+            row += '></td><td><input name="read" type="checkbox" disabled="disabled"';
+            row += collaborator.data_read ? ' checked="checked"' : '';
+            row += '></td><td><input name="edit" type="checkbox" disabled="disabled"';
+            row += collaborator.data_edit ? ' checked="checked"' : '';
+            row += '></td><td><input name="remove" type="checkbox" disabled="disabled"';
+            row += collaborator.data_remove ? ' checked="checked"' : '';
+            row += '></td><td><a href="#"';
             row += `onclick="javascript:remove_collaborator('${encodeURIComponent(collaborator.uuid)}', `;
             row += `'${dataset_uuid}'); return false;" class="fas fa-trash-can" `;
             row += `title="Remove"></a></td></tr>`;
@@ -383,10 +388,10 @@ function add_collaborator (dataset_uuid) {
             "edit": jQuery("input[name='edit'].subitem-checkbox-metadata").prop("checked"),
             "remove": jQuery("input[name='remove'].subitem-checkbox-metadata").prop("checked"),
         },
-        "dataset": {
-            "read": jQuery("input[name='read'].subitem-checkbox-dataset").prop("checked"),
-            "edit": jQuery("input[name='edit'].subitem-checkbox-dataset").prop("checked"),
-            "remove": jQuery("input[name='remove'].subitem-checkbox-dataset").prop("checked"),
+        "data": {
+            "read": jQuery("input[name='read'].subitem-checkbox-data").prop("checked"),
+            "edit": jQuery("input[name='edit'].subitem-checkbox-data").prop("checked"),
+            "remove": jQuery("input[name='remove'].subitem-checkbox-data").prop("checked"),
         },
         "email": or_null(jQuery("#add_collaborator").val())
     }

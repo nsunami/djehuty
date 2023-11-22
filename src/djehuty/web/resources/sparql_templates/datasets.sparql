@@ -151,7 +151,7 @@ WHERE {
       ?dataset            djht:collaborators/rdf:rest*/rdf:first ?collaborator .
       ?collaborator       djht:account ?account .
       ?collaborator       djht:metadata_read  "true"^^xsd:boolean .
-      ?collaborator       djht:metadata_write "true"^^xsd:boolean .
+      ?collaborator       djht:metadata_edit "true"^^xsd:boolean .
     }
 
     OPTIONAL { ?dataset djht:is_under_review       ?is_under_review_tmp . }

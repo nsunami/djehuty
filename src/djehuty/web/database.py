@@ -1549,7 +1549,7 @@ class SparqlInterface:
 
         return self.__run_query(query)
 
-    def insert_collaborator (self, dataset_uuid, collaborator_account_uuid, account_uuid, metadata_read, metadata_edit, metadata_remove):
+    def insert_collaborator (self, dataset_uuid, collaborator_account_uuid, account_uuid, metadata_read, metadata_edit, metadata_remove, data_read, data_edit, data_remove):
         """Procedure to add a collaborator to the state graph. Part of RBAC"""
 
         graph      = Graph()
@@ -1560,6 +1560,9 @@ class SparqlInterface:
         rdf.add (graph, collaborator_uri, rdf.DJHT["metadata_read"],             metadata_read,     XSD.boolean)
         rdf.add (graph, collaborator_uri, rdf.DJHT["metadata_edit"],             metadata_edit,     XSD.boolean)
         rdf.add (graph, collaborator_uri, rdf.DJHT["metadata_remove"],           metadata_remove,   XSD.boolean)
+        rdf.add (graph, collaborator_uri, rdf.DJHT["data_read"],                 data_read,         XSD.boolean)
+        rdf.add (graph, collaborator_uri, rdf.DJHT["data_edit"],                 data_edit,         XSD.boolean)
+        rdf.add (graph, collaborator_uri, rdf.DJHT["data_remove"],               data_remove,       XSD.boolean)
         rdf.add (graph, collaborator_uri, rdf.DJHT["account"],                   rdf.uuid_to_uri(collaborator_account_uuid, "account"),  "uri")
 
         # toevoegen wie de collaborators heeft toegevoegd
@@ -1581,11 +1584,14 @@ class SparqlInterface:
 
             collaborators = [URIRef(collaborator_uri)]
             if self.update_item_list (dataset_uuid, account_uuid, collaborators, "collaborators"):
+                collaborators = self.collaborators(dataset_uuid)
+                for collaborator in collaborators:
+                    self.cache.invalidate_by_prefix(f"datasets_{collaborator['account_uuid']}")
+
                 return rdf.uri_to_uuid (collaborator_uri)
 
             self.log.error("failed to create collaborator list for %s ", collaborator_uri)
         return None
-
 
     def remove_collaborator (self, dataset_uuid, collaborator_uuid):
         "Procedure to remove a collaborator from the state graph. Part of RBAC"
@@ -1688,10 +1694,14 @@ class SparqlInterface:
         if self.enable_query_audit_log:
             self.__log_query (query, "Query Audit Log")
 
+        collaborators = self.collaborators(dataset_uuid)
         result = self.__run_query (query)
         self.cache.invalidate_by_prefix (f"{account_uuid}_storage")
         self.cache.invalidate_by_prefix (f"{dataset_uuid}_dataset_storage")
         self.cache.invalidate_by_prefix (f"datasets_{account_uuid}")
+
+        for collaborator in collaborators:
+            self.cache.invalidate_by_prefix(f"datasets_{collaborator['account_uuid']}")
 
         return result
 
@@ -2041,6 +2051,10 @@ class SparqlInterface:
             "container_doi":   rdf.escape_string_value (container_doi),
             "first_online_date": first_online_date_str
         })
+
+        collaborators = self.collaborators(dataset_uuid)
+        for collaborator in collaborators:
+            self.cache.invalidate_by_prefix(f"datasets_{collaborator['account_uuid']}")
 
         self.cache.invalidate_by_prefix (f"datasets_{account_uuid}")
         self.cache.invalidate_by_prefix ("datasets")

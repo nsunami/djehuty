@@ -14,7 +14,10 @@ def format_collaborator_record (record):
         "email": conv.value_or_none(record, "email"),
         "metadata_read" : conv.value_or_none (record, "metadata_read"),
         "metadata_edit": conv.value_or_none(record, "metadata_edit"),
-        "metadata_remove": conv.value_or_none(record, "metadata_remove")
+        "metadata_remove": conv.value_or_none(record, "metadata_remove"),
+        "data_read": conv.value_or_none(record, "data_read"),
+        "data_edit": conv.value_or_none(record, "data_edit"),
+        "data_remove": conv.value_or_none(record, "data_remove")
     }
 
 def format_account_record (record):

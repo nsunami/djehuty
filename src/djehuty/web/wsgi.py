@@ -2039,7 +2039,7 @@ class ApiServer:
             self.log.info("parameters:%s", parameters)
             #later: dict validatie
             metadata = parameters["metadata"]
-           # data = parameters["data"]
+            data = parameters["data"]
             email = validator.string_value(parameters, "email")
 
             account = self.db.account_by_email(email)
@@ -2052,6 +2052,9 @@ class ApiServer:
                                                          metadata["read"],
                                                          metadata["edit"],
                                                          metadata["remove"],
+                                                         data["read"],
+                                                         data["edit"],
+                                                         data["remove"],
                                                          )
 
             if collaborators is None:
