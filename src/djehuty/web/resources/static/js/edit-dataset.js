@@ -527,6 +527,7 @@ function set_default_git_branch (dataset_uuid, event) {
         accept:      "application/json",
     }).done(function () {
         show_message ("success", `<p>Default Git branch set to <strong>${branch_name}</strong>.</p>`);
+        render_git_files_for_dataset (dataset_uuid, event);
     }).fail(function () {
         show_message ("failure", "<p>Failed to retrieve Git file details.</p>");
     });
@@ -987,6 +988,11 @@ function activate (dataset_uuid) {
                     fileUploader.processQueue();
                 }
                 fileUploader.removeFile(file);
+            },
+            error: function(file, message) {
+                show_message ("failure",
+                              (`<p>Failed to upload ${file.upload.filename}:` +
+                               ` ${message.message}</p>`));
             }
         });
 

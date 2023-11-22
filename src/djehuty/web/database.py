@@ -7,11 +7,11 @@ import uuid
 import secrets
 import os.path
 import logging
-import warnings
 from datetime import datetime
 from urllib.error import URLError, HTTPError
-from SPARQLWrapper import SPARQLWrapper, JSON, SPARQLExceptions
-from rdflib import Graph, Literal, RDF, XSD, URIRef
+from rdflib import Dataset, Graph, Literal, RDF, XSD, URIRef
+from rdflib.plugins.stores import sparqlstore, memory
+from rdflib.store import VALID_STORE
 from jinja2 import Environment, FileSystemLoader
 from djehuty.web import cache
 from djehuty.utils import rdf
@@ -42,13 +42,48 @@ class SparqlInterface:
         self.account_quotas = {}
         self.group_quotas   = {}
         self.default_quota  = 5000000000
+        self.store          = None
 
     def setup_sparql_endpoint (self):
         """Procedure to be called after setting the 'endpoint' members."""
 
-        self.sparql = SPARQLWrapper(endpoint=self.endpoint, updateEndpoint=self.update_endpoint, returnFormat=JSON)
-        self.sparql.setOnlyConneg (True)
+        # BerkeleyDB as local RDF store.
+        if (isinstance (self.endpoint, str) and self.endpoint.startswith("bdb://")):
+            directory = self.endpoint[6:]
+            self.sparql = Dataset("BerkeleyDB")
+            self.sparql.open (directory, create=True)
+            if self.sparql != VALID_STORE:
+                self.log.error ("'%s' is not a valid BerkeleyDB database.", directory)
+                return None
+            self.log.info ("Using BerkeleyDB RDF store.")
+
+        # In-memory SPARQL endpoint. This does not work when live-reload
+        # is enabled.
+        elif (isinstance (self.endpoint, str) and
+              self.endpoint.startswith ("memory://")):
+            self.store = memory.Memory(identifier = URIRef(self.state_graph))
+            self.sparql = Dataset(store = self.store)
+            self.log.info ("Using in-memory RDF store.")
+
+        # External SPARQL endpoints, like Virtuoso.
+        else:
+            if self.update_endpoint is None:
+                self.update_endpoint = self.endpoint
+
+            self.store = sparqlstore.SPARQLUpdateStore(
+                # Avoid rdflib from wrapping in a blank-node graph by setting
+                # context_aware to False.
+                context_aware   = False,
+                query_endpoint  = self.endpoint,
+                update_endpoint = self.update_endpoint,
+                returnFormat    = "json",
+                method          = "POST")
+            # Set bind_namespaces so rdflib does not inject PREFIXes.
+            self.sparql  = Graph(store = self.store, bind_namespaces = "none")
+            self.log.info ("Using external RDF store.")
+
         self.sparql_is_up = True
+        return None
 
     ## ------------------------------------------------------------------------
     ## Private methods
@@ -57,38 +92,57 @@ class SparqlInterface:
     def __log_query (self, query, prefix="Query"):
         self.log.info ("%s:\n---\n%s\n---", prefix, query)
 
-    def __normalize_binding (self, record):
-        for item in record:
-            if "datatype" in record[item]:
-                datatype = record[item]["datatype"]
-                if datatype == "http://www.w3.org/2001/XMLSchema#integer":
-                    record[item] = int(float(record[item]["value"]))
-                elif datatype == "http://www.w3.org/2001/XMLSchema#decimal":
-                    record[item] = int(float(record[item]["value"]))
-                elif datatype == "http://www.w3.org/2001/XMLSchema#boolean":
+    def __normalize_binding (self, row):
+        output = {}
+        for name in row.keys():
+            if isinstance(row[name], Literal):
+                xsd_type = row[name].datatype
+                if xsd_type == XSD.integer:
+                    output[str(name)] = int(float(row[name]))
+                elif xsd_type == XSD.decimal:
+                    output[str(name)] = int(float(row[name]))
+                elif xsd_type == XSD.boolean:
                     try:
-                        record[item] = bool(int(record[item]["value"]))
+                        output[str(name)] = bool(int(row[name]))
                     except ValueError:
-                        record[item] = record[item]["value"].lower() == "true"
-                elif datatype == "http://www.w3.org/2001/XMLSchema#dateTime":
-                    time_value = record[item]["value"].partition(".")[0]
+                        output[str(name)] = str(row[name]).lower() == "true"
+                elif xsd_type == XSD.dateTime:
+                    time_value = row[name].partition(".")[0]
                     if time_value[-1] == 'Z':
                         time_value = time_value[:-1]
-                    record[item] = time_value
-                elif datatype == "http://www.w3.org/2001/XMLSchema#date":
-                    record[item] = record[item]["value"]
-                elif datatype == "http://www.w3.org/2001/XMLSchema#string":
-                    if record[item]["value"] == "NULL":
-                        record[item] = None
+                    if time_value.endswith("+00:00"):
+                        time_value = time_value[:-6]
+                    output[str(name)] = time_value
+                elif xsd_type == XSD.date:
+                    output[str(name)] = row[name]
+                elif xsd_type == XSD.string:
+                    if row[name] == "NULL":
+                        output[str(name)] = None
                     else:
-                        record[item] = record[item]["value"]
-            elif record[item]["type"] == "literal":
-                record[item] = record[item]["value"]
-            elif record[item]["type"] == "uri":
-                record[item] = str(record[item]["value"])
+                        output[str(name)] = str(row[name])
+                # bindings that were produced with BIND() on Virtuoso
+                # have no XSD type.
+                elif xsd_type is None:
+                    output[str(name)] = str(row[name])
+            elif row[name] is None:
+                output[str(name)] = None
             else:
-                self.log.info ("Not a typed-literal: %s", record[item]['type'])
-        return record
+                output[str(name)] = str(row[name])
+
+        return output
+
+    def __normalize_orcid (self, orcid):
+        """Procedure to make storing ORCID identifiers consistent."""
+        # Don't store empty ORCID identifiers.
+        if orcid == "":
+            orcid = None
+        # Strip the URI prefix from ORCID identifiers.
+        elif not isinstance(orcid, str):
+            return None
+        elif orcid.startswith ("https://orcid.org/"):
+            orcid = orcid[18:]
+
+        return orcid
 
     def __query_from_template (self, name, args=None):
         template   = self.jinja.get_template (f"{name}.sparql")
@@ -107,20 +161,31 @@ class SparqlInterface:
             if cached is not None:
                 return cached
 
-        self.sparql.method = 'POST'
-        self.sparql.setQuery(query)
         results = []
         try:
-            if self.sparql.isSparqlUpdateRequest():
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    self.sparql.query().convert()
+            execution_type, query_type = rdf.query_type (query)
+            if execution_type == "update":
+                self.sparql.update (query)
+                self.sparql.commit()
                 ## Upon failure, an exception is thrown.
                 results = True
+            elif execution_type == "gather":
+                query_results = self.sparql.query(query)
+                ## ASK queries only return a boolean.
+                if query_type == "ASK":
+                    results = query_results.askAnswer
+                elif isinstance(query_results, tuple):
+                    self.log.error ("Error executing query (%s): %s",
+                                    query_results[0], query_results[1])
+                    self.__log_query (query)
+                    return []
+                else:
+                    results = list(map(self.__normalize_binding,
+                                       query_results.bindings))
             else:
-                query_results = self.sparql.query().convert()
-                results = list(map(self.__normalize_binding,
-                                   query_results["results"]["bindings"]))
+                self.log.error ("Invalid query (%s, %s)", execution_type, query_type)
+                self.__log_query (query)
+                return []
 
             if cache_key_string is not None:
                 self.cache.cache_value (prefix, cache_key, results, query)
@@ -142,20 +207,18 @@ class SparqlInterface:
             self.log.error ("SPARQL endpoint returned %d:\n---\n%s\n---",
                             error.code, error.reason)
             return []
-        except (URLError, SPARQLExceptions.EndPointNotFound):
+        except URLError:
             if self.sparql_is_up:
                 self.log.error ("Connection to the SPARQL endpoint seems down.")
                 self.sparql_is_up = False
                 return []
-        except SPARQLExceptions.QueryBadFormed:
-            self.log.error ("Badly formed SPARQL query:")
+        except AttributeError as error:
+            self.log.error ("SPARQL query failed.")
+            self.log.error ("Exception: %s", error)
             self.__log_query (query)
-        except SPARQLExceptions.EndPointInternalError as error:
-            self.log.error ("SPARQL internal error: %s", error)
-            return []
         except Exception as error:  # pylint: disable=broad-exception-caught
             self.log.error ("SPARQL query failed.")
-            self.log.error ("Exception: %s", type(error))
+            self.log.error ("Exception: %s: %s", type(error), error)
             self.__log_query (query)
             return []
 
@@ -230,16 +293,27 @@ class SparqlInterface:
                 if (isinstance (element, dict)
                     and len(element.items()) == 1
                     and next(iter(element)) == "operator"):
-                    filters += f" {element['operator'].upper()} "
+                    if element['operator'] == "(":
+                        filters += " || "
+                        continue
+                    if element['operator'] == ")":
+                        continue
+                    filters += f" {element['operator']} "
                 else:
                     filter_list = []
                     for key, value in element.items():
-                        if '"' in value:
-                            value = value.replace('"', '\\\"')
+                        if value == "":
+                            continue
                         escaped_value = rdf.escape_string_value (value.lower())
-                        filter_list.append(f" CONTAINS(LCASE(?{key}), {escaped_value}) \n")
-                    filters += f"({' || '.join(filter_list)}) "
+                        filter_list.append(f"CONTAINS(LCASE(?{key}), {escaped_value})\n")
+                    if filter_list:
+                        filters += (f"({' || '.join(filter_list)})")
             filters += ")"
+
+            # Post-construction heuristical query fixing
+            # It's undocumented because it needs to be replaced.
+            filters = filters.replace("FILTER ( || ", "FILTER (")
+            filters = filters.replace(")(", ") || (")
         else:
             filter_list = []
             for search_term in search_for:
@@ -263,7 +337,8 @@ class SparqlInterface:
                   offset=None, order=None, order_direction=None, published_since=None,
                   resource_doi=None, return_count=False, search_for=None, search_format=False,
                   version=None, is_published=True, is_under_review=None, git_uuid=None,
-                  private_link_id_string=None, use_cache=True):
+                  private_link_id_string=None, use_cache=True, is_restricted=None,
+                  is_embargoed=None):
         """Procedure to retrieve version(s) of datasets."""
 
         filters  = rdf.sparql_filter ("container_uri",  rdf.uuid_to_uri (container_uuid, "container"), is_uri=True)
@@ -276,6 +351,8 @@ class SparqlInterface:
         filters += rdf.sparql_filter ("resource_doi",   resource_doi, escape=True)
         filters += rdf.sparql_filter ("doi",            doi,          escape=True)
         filters += rdf.sparql_filter ("handle",         handle,       escape=True)
+        filters += rdf.sparql_filter ("is_restricted",          is_restricted)
+        filters += rdf.sparql_filter ("is_embargoed",           is_embargoed)
         filters += rdf.sparql_filter ("private_link_id_string", private_link_id_string, escape=True)
         filters += rdf.sparql_in_filter ("group_id",    groups)
         filters += rdf.sparql_in_filter ("dataset_id", exclude_ids, negate=True)
@@ -1217,7 +1294,7 @@ class SparqlInterface:
 
         query = self.__query_from_template ("update_orcid_for_account", {
             "account_uuid":  account_uuid,
-            "orcid":         orcid,
+            "orcid":         self.__normalize_orcid (orcid),
         })
 
         if self.enable_query_audit_log:
@@ -1269,6 +1346,7 @@ class SparqlInterface:
 
         graph.add ((author_uri, RDF.type,      rdf.DJHT["Author"]))
 
+        orcid_id = self.__normalize_orcid (orcid_id)
         rdf.add (graph, author_uri, rdf.DJHT["id"],             author_id)
         rdf.add (graph, author_uri, rdf.DJHT["institution_id"], institution_id)
         rdf.add (graph, author_uri, rdf.DJHT["group_id"],       group_id)
@@ -1415,6 +1493,29 @@ class SparqlInterface:
         query = self.__query_from_template ("append_to_list", {
             "last_blank_node":   node_to_be_appended_to,
             "append_blank_node": node_to_append
+        })
+
+        if self.enable_query_audit_log:
+            self.__log_query (query, "Query Audit Log")
+
+        return self.__run_query (query)
+
+    def delete_item_from_list (self, subject, predicate, rdf_first_value, value_type="uri"):
+        """
+        Removes node from list where RDF_FIRST_VALUE is the rdf:first property
+        in the list pointed to by SUBJECT and PREDICATE.
+        """
+
+        first = None
+        if value_type != "uri":
+            first = rdf.escape_value (rdf_first_value, value_type)
+        else:
+            first = URIRef(rdf_first_value).n3()
+
+        query = self.__query_from_template ("delete_item_from_list", {
+            "subject":   subject,
+            "predicate": rdf.DJHT[predicate].n3(),
+            "first":     first
         })
 
         if self.enable_query_audit_log:
@@ -1683,6 +1784,17 @@ class SparqlInterface:
         rdf.add (graph, item_uri, rdf.DJHT[name], value)
         return True
 
+    def dataset_is_under_review (self, dataset_uuid):
+        """
+        Returns True when the dataset identified by DATASET_UUID is under
+        review, False otherwise.
+        """
+        query = self.__query_from_template ("dataset_is_under_review", {
+            "dataset_uuid": dataset_uuid
+        })
+
+        return self.__run_query (query)
+
     def delete_dataset_draft (self, container_uuid, dataset_uuid, account_uuid):
         """Remove the draft dataset from a container in the state graph."""
 
@@ -1702,6 +1814,10 @@ class SparqlInterface:
 
         for collaborator in collaborators:
             self.cache.invalidate_by_prefix(f"datasets_{collaborator['account_uuid']}")
+
+        is_under_review = self.dataset_is_under_review (dataset_uuid)
+        if is_under_review:
+            self.cache.invalidate_by_prefix ("reviews")
 
         return result
 
@@ -2281,6 +2397,7 @@ class SparqlInterface:
         if self.add_triples_from_graph (graph):
             container_uuid = rdf.uri_to_uuid (container)
             self.log.info ("Inserted collection %s", container_uuid)
+            self.cache.invalidate_by_prefix (f"collections_{account_uuid}")
             return container_uuid, rdf.uri_to_uuid (uri)
 
         return None, None
@@ -2388,12 +2505,16 @@ class SparqlInterface:
     def categories_tree (self):
         """Procedure to return a tree of categories."""
 
-        categories = self.root_categories ()
-        for category in categories:
-            subcategories = self.subcategories_for_category (category["uuid"])
-            category["subcategories"] = subcategories
+        query   = self.__query_from_template ("categories_tree")
+        results = self.__run_query (query, query, "categories_tree")
+        roots   = list (filter (lambda category: conv.value_or (category, "parent_id", 0) == 0, results))
+        for root in roots:
+            # The iterable 'subcategories' is materialized by the call to 'sorted'.
+            subcategories = filter (lambda category: conv.value_or_none (category, "parent_id") == root["id"], results)  # pylint: disable=cell-var-from-loop
+            root["subcategories"] = sorted (subcategories, key = lambda field: field["title"])
 
-        return categories
+        roots = sorted (roots, key = lambda field: field["title"])
+        return roots
 
     def group (self, group_id=None, parent_id=None, name=None,
                association=None, limit=None, offset=None,
@@ -2598,11 +2719,12 @@ class SparqlInterface:
 
         try:
             privileges = {}
-            if account["email"] in self.privileges:
-                privileges = self.privileges[account["email"]]
+            email = account["email"].lower()
+            if email in self.privileges:
+                privileges = self.privileges[email]
 
             domain     = conv.value_or (account, "domain", "")
-            quota      = self.account_quota (account["email"], domain)
+            quota      = self.account_quota (email, domain)
             account    = { **account, **privileges, "quota": quota }
         except (TypeError, KeyError):
             pass
@@ -2633,7 +2755,8 @@ class SparqlInterface:
         ## this to look up the email addresses without accessing the
         ## SPARQL endpoint.
         for email_address in self.privileges:  # pylint: disable=consider-using-dict-items
-            if self.privileges[email_address][privilege]:
+            email = email_address.lower()
+            if self.privileges[email][privilege]:
                 addresses.append(email_address)
 
         return addresses
@@ -2744,6 +2867,11 @@ class SparqlInterface:
             self.log.info ("Linked account of %s to ORCID: %s.", email, orcid)
             continue
 
+    def update_view_and_download_counts (self):
+        """Procedure that recalculate views and downloads statistics."""
+        query = self.__query_from_template ("update_view_and_download_counts")
+        return self.__run_query (query)
+
     def insert_session (self, account_uuid, name=None, token=None, editable=False,
                         override_mfa=False):
         """Procedure to add a session token for an account_uuid."""
@@ -2773,7 +2901,7 @@ class SparqlInterface:
 
         mfa_token = None
         try:
-            if self.privileges[account["email"]]["needs_2fa"] and not override_mfa:
+            if self.privileges[account["email"].lower()]["needs_2fa"] and not override_mfa:
                 mfa_token = secrets.randbelow (1000000)
                 graph.add ((link_uri, rdf.DJHT["mfa_token"], Literal(mfa_token, datatype=XSD.integer)))
                 graph.add ((link_uri, rdf.DJHT["mfa_tries"], Literal(0, datatype=XSD.integer)))
@@ -2858,13 +2986,14 @@ class SparqlInterface:
 
         return self.__run_query (query)
 
-    def __may_execute_role (self, session_token, task):
+    def __may_execute_role (self, session_token, task, account=None):
         """Returns True when the sessions' account may perform 'task'."""
 
         if session_token is None:
             return False
 
-        account = self.account_by_session_token (session_token)
+        if account is None:
+            account = self.account_by_session_token (session_token)
         try:
             return account[f"may_{task}"]
         except (KeyError, TypeError):
@@ -2872,26 +3001,57 @@ class SparqlInterface:
 
         return False
 
-    def may_review (self, session_token):
+    def may_receive_email_notifications (self, email):
+        """
+        Returns True when the account identified by EMAIL may receive an
+        e-mail notification.  This procedure assumes True unless False is
+        explicitely specified, so that it can be used in logic where
+        e-mails are sent to accounts that have no preference set.
+        """
+        if email is None:
+            return False
+
+        # When an account was created from an ORCID login, there is no
+        # valid e-mail address known for the user. These addresses end
+        # with just '@orcid'.  This is a safety measure to prevent attempting
+        # to send e-mail to invalid e-mail addresses.
+        if email.endswith("orcid"):
+            return False
+
+        account = self.account_by_email (email)
+        try:
+            return account["may_receive_email_notifications"]
+        except (KeyError, TypeError):
+            pass
+
+        # Assume it's OK to send e-mails unless explicitly specified
+        # not to do so.
+        return True
+
+    def may_review (self, session_token, account=None):
         """Returns True when the session's account is a reviewer."""
-        return self.__may_execute_role (session_token, "review")
+        return self.__may_execute_role (session_token, "review", account)
 
-    def may_administer (self, session_token):
+    def may_administer (self, session_token, account=None):
         """Returns True when the session's account is an administrator."""
-        return self.__may_execute_role (session_token, "administer")
+        return self.__may_execute_role (session_token, "administer", account)
 
-    def may_impersonate (self, session_token):
+    def may_query (self, session_token, account=None):
+        """Returns True when the session's account is an administrator and may query."""
+        return (self.__may_execute_role (session_token, "administer", account) and
+                self.__may_execute_role (session_token, "query", account))
+
+    def may_impersonate (self, session_token, account=None):
         """Returns True when the session's account may impersonate other accounts."""
-        return self.__may_execute_role (session_token, "impersonate")
+        return self.__may_execute_role (session_token, "impersonate", account)
 
-    def may_review_quotas (self, session_token):
+    def may_review_quotas (self, session_token, account=None):
         """Returns True when the session's account may handle storage requests."""
-        return self.__may_execute_role (session_token, "review_quotas")
+        return self.__may_execute_role (session_token, "review_quotas", account)
 
     def is_depositor (self, session_token):
         """Returns True when the account linked to the session is a depositor, False otherwise"""
-        account = self.account_by_session_token (session_token)
-        return account is not None
+        return self.is_logged_in (session_token)
 
     def is_logged_in (self, session_token):
         """Returns True when the session_token is valid, False otherwise."""
@@ -2962,3 +3122,16 @@ class SparqlInterface:
         self.__log_query (query)
 
         return False
+
+    def run_query (self, query, session_token):
+        """Procedure to run a SPARQL query."""
+
+        if not self.may_query (session_token):
+            return False
+
+        if self.enable_query_audit_log:
+            execution_type, _ = rdf.query_type (query)
+            if execution_type == "update":
+                self.__log_query (query, "Query Audit Log (manual execution)")
+
+        return self.__run_query (query)

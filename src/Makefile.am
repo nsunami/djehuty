@@ -9,7 +9,6 @@ PYTHON_FILES =                                                                \
     djehuty/backup/ui.py                                                      \
     djehuty/utils/constants.py                                                \
     djehuty/utils/convenience.py                                              \
-    djehuty/utils/html2md.py                                                  \
     djehuty/utils/rdf.py                                                      \
     djehuty/web/cache.py                                                      \
     djehuty/web/database.py                                                   \
@@ -36,7 +35,11 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/html_templates/activate_2fa_session.html            \
     djehuty/web/resources/html_templates/admin/dashboard.html                 \
     djehuty/web/resources/html_templates/admin/exploratory.html               \
+    djehuty/web/resources/html_templates/admin/reports/dashboard.html         \
+    djehuty/web/resources/html_templates/admin/reports/embargoed_datasets.html \
+    djehuty/web/resources/html_templates/admin/reports/restricted_datasets.html \
     djehuty/web/resources/html_templates/admin/maintenance.html               \
+    djehuty/web/resources/html_templates/admin/sparql.html                    \
     djehuty/web/resources/html_templates/admin/users.html                     \
     djehuty/web/resources/html_templates/author.html                          \
     djehuty/web/resources/html_templates/categories.html                      \
@@ -83,7 +86,6 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/html_templates/portal.html                          \
     djehuty/web/resources/html_templates/private_link_is_expired.html         \
     djehuty/web/resources/html_templates/public_metadata.html                 \
-    djehuty/web/resources/html_templates/review/dashboard.html                \
     djehuty/web/resources/html_templates/review/overview.html                 \
     djehuty/web/resources/html_templates/review/published.html                \
     djehuty/web/resources/html_templates/search.html                          \
@@ -105,6 +107,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/sparql_templates/author_public_items.sparql         \
     djehuty/web/resources/sparql_templates/authors.sparql                     \
     djehuty/web/resources/sparql_templates/categories.sparql                  \
+    djehuty/web/resources/sparql_templates/categories_tree.sparql             \
     djehuty/web/resources/sparql_templates/category_by_id.sparql              \
     djehuty/web/resources/sparql_templates/collection_dataset_containers.sparql \
     djehuty/web/resources/sparql_templates/collection_datasets.sparql         \
@@ -118,6 +121,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/sparql_templates/container_uuid_by_id.sparql        \
     djehuty/web/resources/sparql_templates/custom_fields.sparql               \
     djehuty/web/resources/sparql_templates/dataset_files.sparql               \
+    djehuty/web/resources/sparql_templates/dataset_is_under_review.sparql     \
     djehuty/web/resources/sparql_templates/dataset_statistics.sparql          \
     djehuty/web/resources/sparql_templates/dataset_statistics_timeline.sparql \
     djehuty/web/resources/sparql_templates/dataset_storage_used.sparql        \
@@ -131,6 +135,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/sparql_templates/delete_dataset_embargo.sparql      \
     djehuty/web/resources/sparql_templates/delete_inactive_session_by_uuid.sparql \
     djehuty/web/resources/sparql_templates/delete_item_categories.sparql      \
+    djehuty/web/resources/sparql_templates/delete_item_from_list.sparql       \
     djehuty/web/resources/sparql_templates/delete_private_links.sparql        \
     djehuty/web/resources/sparql_templates/delete_session.sparql              \
     djehuty/web/resources/sparql_templates/delete_session_by_uuid.sparql      \
@@ -173,6 +178,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/sparql_templates/update_private_link.sparql         \
     djehuty/web/resources/sparql_templates/update_review.sparql               \
     djehuty/web/resources/sparql_templates/update_session.sparql              \
+    djehuty/web/resources/sparql_templates/update_view_and_download_counts.sparql \
     djehuty/web/resources/static/css/dropzone.min.css                         \
     djehuty/web/resources/static/css/jquery.dataTables.min.css                \
     djehuty/web/resources/static/css/form.css                                 \
@@ -223,6 +229,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/static/images/logosleft-white-wageningen.png        \
     djehuty/web/resources/static/images/logo-twente.png                       \
     djehuty/web/resources/static/images/logo-wageningen.png                   \
+    djehuty/web/resources/static/images/nikhef-black.svg                      \
     djehuty/web/resources/static/images/orcid.svg                             \
     djehuty/web/resources/static/images/portal/aerospace-engineering.jpg      \
     djehuty/web/resources/static/images/portal/agricultural-and-veterinary-sciences.jpg \
@@ -249,6 +256,11 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/static/images/portal/tueindhoven.jpg                \
     djehuty/web/resources/static/images/portal/utwente.jpg                    \
     djehuty/web/resources/static/images/portal/wageningen.jpg                 \
+    djehuty/web/resources/static/js/ace/ace.js                                \
+    djehuty/web/resources/static/js/ace/ext-language_tools.js                 \
+    djehuty/web/resources/static/js/ace/ext-searchbox.js                      \
+    djehuty/web/resources/static/js/ace/mode-sparql.js                        \
+    djehuty/web/resources/static/js/ace/theme-crimson_editor.js               \
     djehuty/web/resources/static/js/d3.v7.min.js                              \
     djehuty/web/resources/static/js/dataset_landing_page.js                   \
     djehuty/web/resources/static/js/depositor-dashboard.js                    \
@@ -259,6 +271,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/static/js/exploratory.js                            \
     djehuty/web/resources/static/js/jquery.dataTables.min.js                  \
     djehuty/web/resources/static/js/jquery-3.6.0.min.js                       \
+    djehuty/web/resources/static/js/query-editor.js                           \
     djehuty/web/resources/static/js/quill.min.js                              \
     djehuty/web/resources/static/js/review-overview.js                        \
     djehuty/web/resources/static/js/ranking.js                                \

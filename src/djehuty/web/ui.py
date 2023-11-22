@@ -7,6 +7,7 @@ import shutil
 import json
 from defusedxml import ElementTree
 from werkzeug.serving import run_simple
+from rdflib.plugins.stores import berkeleydb
 from djehuty.web import wsgi
 from djehuty.utils import convenience
 import djehuty.backup.database as backup_database
@@ -127,7 +128,7 @@ def read_quotas_configuration (server, xml_root):
 
         # Account-specific quotas
         elif email is not None:
-            server.db.account_quotas[email] = value
+            server.db.account_quotas[email.lower()] = value
 
     return None
 
@@ -327,24 +328,27 @@ def read_privilege_configuration (server, xml_root, logger):
             orcid = None
             if "orcid" in account.attrib:
                 orcid = account.attrib["orcid"]
-
-            server.db.privileges[email] = {
+            lowercase_email = email.lower()
+            server.db.privileges[lowercase_email] = {
                 "may_administer":  bool(int(config_value (account, "may-administer", None, False))),
+                "may_query":       bool(int(config_value (account, "may-run-sparql-queries", None, False))),
                 "may_impersonate": bool(int(config_value (account, "may-impersonate", None, False))),
                 "may_review":      bool(int(config_value (account, "may-review", None, False))),
                 "may_review_quotas": bool(int(config_value (account, "may-review-quotas", None, False))),
                 "may_process_feedback": bool(int(config_value (account, "may-process-feedback", None, False))),
+                "may_receive_email_notifications": bool(int(config_value (account, "may-receive-email-notifications", None, True))),
                 "orcid":           orcid
             }
 
             ## The "needs_2fa" property is set to True when the user has any
             ## extra privilege.
-            server.db.privileges[email]["needs_2fa"] = (not server.disable_2fa) and (
-                server.db.privileges[email]["may_administer"] or
-                server.db.privileges[email]["may_impersonate"] or
-                server.db.privileges[email]["may_review"] or
-                server.db.privileges[email]["may_process_feedback"] or
-                server.db.privileges[email]["may_review_quotas"]
+            server.db.privileges[lowercase_email]["needs_2fa"] = (not server.disable_2fa) and (
+                server.db.privileges[lowercase_email]["may_administer"] or
+                server.db.privileges[lowercase_email]["may_query"] or
+                server.db.privileges[lowercase_email]["may_impersonate"] or
+                server.db.privileges[lowercase_email]["may_review"] or
+                server.db.privileges[lowercase_email]["may_process_feedback"] or
+                server.db.privileges[lowercase_email]["may_review_quotas"]
             )
 
         except KeyError as error:
@@ -434,6 +438,15 @@ def read_datacite_configuration (server, xml_root):
         server.datacite_id       = config_value (datacite, "repository-id")
         server.datacite_password = config_value (datacite, "password")
         server.datacite_prefix   = config_value (datacite, "prefix")
+
+def read_automatic_login_configuration (server, xml_root):
+    """Procedure to parse and set automatic login for development setups."""
+    automatic_login_email = config_value (xml_root, "authentication/automatic-login-email")
+    if (automatic_login_email is not None
+        and server.orcid_client_id is None
+        and server.saml_config is None):
+        server.identity_provider = "automatic-login"
+        server.automatic_login_email = automatic_login_email
 
 def read_orcid_configuration (server, xml_root):
     """Procedure to parse and set the ORCID API configuration."""
@@ -549,10 +562,11 @@ def read_configuration_file (server, config_file, address, port, state_graph,
             except (ValueError, TypeError):
                 logger.info("Invalid value for disable-2fa. Ignoring.. assuming 1 (True)")
 
-        enable_query_audit_log = config_value (xml_root, "enable-query-audit-log")
-        if enable_query_audit_log:
+        enable_query_audit_log = xml_root.find ("enable-query-audit-log")
+        if enable_query_audit_log is not None:
+            config["transactions_directory"] = enable_query_audit_log.attrib.get("transactions-directory")
             try:
-                server.db.enable_query_audit_log = bool(int(enable_query_audit_log))
+                server.db.enable_query_audit_log = bool(int(enable_query_audit_log.text))
             except (ValueError, TypeError):
                 logger.info("Invalid value for enable-query-audit-log. Ignoring.. assuming 1 (True)")
 
@@ -643,6 +657,7 @@ def read_configuration_file (server, config_file, address, port, state_graph,
         read_datacite_configuration (server, xml_root)
         read_email_configuration (server, xml_root, logger)
         read_saml_configuration (server, xml_root, logger)
+        read_automatic_login_configuration (server, xml_root)
         read_privilege_configuration (server, xml_root, logger)
         read_quotas_configuration (server, xml_root)
 
@@ -701,6 +716,110 @@ def read_configuration_file (server, config_file, address, port, state_graph,
 
     return {}
 
+def extract_transactions (config, since_datetime):
+    """Extract the queries from the audit log and write them as files."""
+
+    if "log-file" not in config:
+        print("No log file found to extract queries from.", file=sys.stderr)
+        sys.exit (1)
+    filename = config["log-file"]
+    try:
+        if "transactions_directory" in config:
+            directory_prefix = config["transactions_directory"]
+            os.makedirs(directory_prefix, mode=0o700, exist_ok=True)
+            if not os.path.isdir(directory_prefix):
+                print (f"Failed to create '{directory_prefix}'.", file=sys.stderr)
+
+        with open (filename, "r", encoding = "utf-8") as log_file:
+            print (f"Reading '{filename}'.", file=sys.stderr)
+            lines        = log_file.readlines()
+            count        = 0
+            state_output = 0
+            query        = ""
+            timestamp_line = ""
+            for line in lines:
+                if state_output == 2:
+                    if line == "---\n":
+                        state_output = 0
+                        with open (f"{directory_prefix}/transaction_{count:08d}.sparql",
+                                   "w", encoding="utf-8") as output_file:
+                            output_file.write (query)
+                        query = ""
+                    else:
+                        now_statement = "    BIND(NOW() AS ?now)\n"
+                        if now_statement == line:
+                            try:
+                                components = timestamp_line.split(" ")
+                                date       = components[1]
+                                time       = components[2].partition(",")[0]
+                                replacement = (f'    BIND("{date}T{time}Z"'
+                                               '^^xsd:dateTime AS ?now)\n')
+                                line = line.replace (now_statement, replacement)
+                            except IndexError:
+                                print (f"Failed to read '{timestamp_line}'.",
+                                       file=sys.stderr)
+
+                        # Due to a bug (c7204bc), some queries contained the
+                        # following line.  It's safe to re-run the query
+                        # without this line.  It only cleans up some triples.
+                        if line != "{self.default_prefixes}\n":
+                            query += line
+                elif state_output == 1 and line == "---\n":
+                    state_output = 2
+                elif "Query Audit Log" in line:
+                    timestamp_line = line
+
+                    if since_datetime:
+                        # [INFO] 2023-07-28 20:58:35,089 -
+                        log_datetime = " ".join(line.split(" ")[1:3])
+                        if log_datetime < since_datetime:
+                            continue
+
+                    query += f"# {line}"
+                    count += 1
+                    state_output = 1
+            print (f"Extracted {count} items", file=sys.stderr)
+    except FileNotFoundError:
+        print (f"Could not open '{filename}'.", file=sys.stderr)
+        sys.exit (1)
+
+def apply_transactions_from_directory (logger, server, config, transactions_directory):
+    """Apply extracted transactions from the query audit log."""
+
+    # Override with the value from the configuration file.
+    directory = transactions_directory
+    if "transactions_directory" in config:
+        directory = config["transactions_directory"]
+
+    print (f"Finding transactions in '{directory}'.")
+    transactions = list(filter(lambda x: (x.startswith("transaction_") and
+                                          x.endswith(".sparql")),
+                               os.listdir(directory)))
+    transactions = sorted(transactions)
+
+    print(f"Applying {len(transactions)} transactions.")
+    try:
+        for transaction_file in transactions:
+            filename = f"{directory}/{transaction_file}"
+            applied_filename = f"{directory}/applied_{transaction_file}"
+            with open(filename, "r", encoding="utf-8") as transaction:
+                query = transaction.read()
+                server.db.sparql.update (query)
+                print(f"Applied {transaction.name}.")
+            os.rename (filename, applied_filename)
+
+        with open (applied_filename, "r", encoding="utf-8") as transaction:
+            line           = transaction.readline()
+            last_timestamp = " ".join(line.split(" ")[2:4])
+            logger.setLevel(logging.INFO)
+            logger.info ("Applied transactions up until %s.", last_timestamp)
+        return True
+    except Exception as error:  # pylint: disable=broad-exception-caught
+        print ("Applying transaction failed.", file=sys.stderr)
+        print (f"Exception: {type(error)}: {error}", file=sys.stderr)
+
+    return False
+
 ## ----------------------------------------------------------------------------
 ## Starting point for the command-line program
 ## ----------------------------------------------------------------------------
@@ -708,7 +827,7 @@ def read_configuration_file (server, config_file, address, port, state_graph,
 def main (address=None, port=None, state_graph=None, storage=None,
           base_url=None, config_file=None, use_debugger=False,
           use_reloader=False, run_internal_server=True, initialize=True,
-          extract_transactions_from_log=None):
+          extract_transactions_from_log=None, apply_transactions=None):
     """The main entry point for the 'web' subcommand."""
     try:
         convenience.add_logging_level ("ACCESS", logging.INFO + 5)
@@ -728,6 +847,10 @@ def main (address=None, port=None, state_graph=None, storage=None,
             logger.setLevel(logging.ERROR)
             since_datetime = extract_transactions_from_log
 
+        if apply_transactions is not None:
+            logger = logging.getLogger (__name__)
+            logger.setLevel(logging.ERROR)
+
         server = wsgi.ApiServer ()
         config_files = set()
         config = read_configuration_file (server, config_file, address, port,
@@ -737,62 +860,17 @@ def main (address=None, port=None, state_graph=None, storage=None,
 
         ## Handle extracting Query Audit Logs early on.
         if extract_transactions_from_log is not None:
-            if "log-file" not in config:
-                print("No log file found to extract queries from.", file=sys.stderr)
-                sys.exit (1)
-            filename = config["log-file"]
-            try:
-                with open (filename, "r", encoding = "utf-8") as log_file:
-                    print (f"Reading '{filename}'.", file=sys.stderr)
-                    lines        = log_file.readlines()
-                    count        = 0
-                    state_output = 0
-                    query        = ""
-                    timestamp_line = ""
-                    for line in lines:
-                        if state_output == 2:
-                            if line == "---\n":
-                                state_output = 0
-                                with open (f"transaction_{count:08d}.sparql", "w",
-                                           encoding="utf-8") as output_file:
-                                    output_file.write (query)
-                                query = ""
-                            else:
-                                now_statement = "    BIND(NOW() AS ?now)\n"
-                                if now_statement == line:
-                                    try:
-                                        components = timestamp_line.split(" ")
-                                        date       = components[1]
-                                        time       = components[2].partition(",")[0]
-                                        replacement = (f'    BIND("{date}T{time}Z"'
-                                                       '^^xsd:dateTime AS ?now)\n')
-                                        line = line.replace (now_statement, replacement)
-                                    except IndexError:
-                                        print (f"Failed to read '{timestamp_line}'.",
-                                               file=sys.stderr)
-                                query += line
-                        elif state_output == 1 and line == "---\n":
-                            state_output = 2
-                        elif "Query Audit Log" in line:
-                            timestamp_line = line
-
-                            if since_datetime:
-                                # [INFO] 2023-07-28 20:58:35,089 -
-                                log_datetime = " ".join(line.split(" ")[1:3])
-                                if log_datetime < since_datetime:
-                                    continue
-
-                            query += f"# {line}"
-                            count += 1
-                            state_output = 1
-                    print (f"Extracted {count} items", file=sys.stderr)
-            except FileNotFoundError:
-                print (f"Could not open '{filename}'.", file=sys.stderr)
-                sys.exit (1)
-
-            return None
+            return extract_transactions (config, since_datetime)
 
         inside_reload = os.environ.get('WERKZEUG_RUN_MAIN')
+
+        if (isinstance (server.db.endpoint, str) and
+            server.db.endpoint.startswith("bdb://") and
+            not berkeleydb.has_bsddb):
+            logger.error(("Configured a BerkeleyDB database back-end, "
+                          "but BerkeleyDB is not installed on the system "
+                          "or the 'berkeleydb' Python package is missing."))
+            sys.exit (1)
 
         if not server.db.cache.cache_is_ready() and not inside_reload:
             logger.error ("Failed to set up cache layer.")
@@ -825,6 +903,10 @@ def main (address=None, port=None, state_graph=None, storage=None,
                 logger.error ("Falling back to %s.", server.db.profile_images_storage)
 
         server.db.setup_sparql_endpoint ()
+
+        if apply_transactions is not None:
+            return apply_transactions_from_directory (logger, server, config, apply_transactions)
+
         if not run_internal_server:
             server.using_uwsgi = True
             server.locks.using_uwsgi = True
@@ -865,7 +947,7 @@ def main (address=None, port=None, state_graph=None, storage=None,
                     raise MissingConfigurationError
 
             for email_address in server.db.privileges:  # pylint: disable=consider-using-dict-items
-                if server.db.privileges[email_address]["needs_2fa"]:
+                if server.db.privileges[email_address.lower()]["needs_2fa"]:
                     logger.info ("Enabled 2FA for %s.", email_address)
 
             if initialize:

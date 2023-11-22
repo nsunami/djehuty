@@ -1,6 +1,7 @@
 """This module implements the entire HTTP interface for users."""
 
 from datetime import date, datetime, timedelta
+from io import StringIO
 import os.path
 import os
 import getpass
@@ -11,6 +12,7 @@ import subprocess
 import secrets
 import re
 import base64
+import csv
 import requests
 import pygit2
 import zipfly
@@ -75,6 +77,7 @@ class ApiServer:
         self.show_science_categories = True
         self.show_latest_datasets = True
         self.disable_2fa      = False
+        self.automatic_login_email = None
         self.small_footer     = (
             '<div id="footer-wrapper2"><p>This repository is powered by '
             '<a href="https://github.com/4TUResearchData/djehuty">djehuty</a> '
@@ -139,7 +142,6 @@ class ApiServer:
             R("/my/sessions/new",                                                self.ui_new_session),
             R("/my/profile",                                                     self.ui_profile),
             R("/my/profile/connect-with-orcid",                                  self.ui_profile_connect_with_orcid),
-            R("/review/dashboard",                                               self.ui_review_dashboard),
             R("/review/overview",                                                self.ui_review_overview),
             R("/review/goto-dataset/<dataset_id>",                               self.ui_review_impersonate_to_dataset),
             R("/review/assign-to-me/<dataset_id>",                               self.ui_review_assign_to_me),
@@ -148,10 +150,15 @@ class ApiServer:
             R("/admin/dashboard",                                                self.ui_admin_dashboard),
             R("/admin/users",                                                    self.ui_admin_users),
             R("/admin/exploratory",                                              self.ui_admin_exploratory),
+            R("/admin/sparql",                                                   self.ui_admin_sparql),
+            R("/admin/reports",                                                  self.ui_admin_reports),
+            R("/admin/reports/restricted_datasets",                              self.ui_admin_reports_restricted_datasets),
+            R("/admin/reports/embargoed_datasets",                               self.ui_admin_reports_embargoed_datasets),
             R("/admin/impersonate/<account_uuid>",                               self.ui_admin_impersonate),
             R("/admin/maintenance",                                              self.ui_admin_maintenance),
             R("/admin/maintenance/clear-cache",                                  self.ui_admin_clear_cache),
             R("/admin/maintenance/clear-sessions",                               self.ui_admin_clear_sessions),
+            R("/admin/maintenance/recalculate-statistics",                       self.ui_admin_recalculate_statistics),
             R("/categories/<category_id>",                                       self.ui_categories),
             R("/category",                                                       self.ui_category),
             R("/institutions/<institution_name>",                                self.ui_institution),
@@ -394,6 +401,7 @@ class ApiServer:
     def __render_template (self, request, template_name, **context):
         template      = self.jinja.get_template (template_name)
         token         = self.token_from_cookie (request)
+        account       = self.db.account_by_session_token (token)
         impersonator_token = self.__impersonator_token (request)
         parameters    = {
             "base_url":        self.base_url,
@@ -410,16 +418,17 @@ class ApiServer:
             "orcid_client_id": self.orcid_client_id,
             "orcid_endpoint":  self.orcid_endpoint,
             "session_token":   self.token_from_request (request),
-            "is_logged_in":    self.db.is_logged_in (token),
+            "is_logged_in":    account is not None,
             "is_reviewing":    self.db.may_review (impersonator_token),
-            "may_review":      self.db.may_review (token),
-            "may_administer":  self.db.may_administer (token),
-            "may_impersonate":  self.db.may_impersonate (token),
+            "may_review":      self.db.may_review (token, account),
+            "may_administer":  self.db.may_administer (token, account),
+            "may_query":       self.db.may_query (token, account),
+            "may_impersonate":  self.db.may_impersonate (token, account),
             "impersonating_account": self.__impersonating_account (request),
             "menu":            self.menu,
         }
         return self.response (template.render({ **context, **parameters }),
-                              mimetype='text/html; charset=utf-8')
+                              mimetype='text/html')
 
     def __render_email_templates (self, template_name, **context):
         """Render a plaintext and an HTML body for sending in an e-mail."""
@@ -436,8 +445,7 @@ class ApiServer:
 
     def __render_export_format (self, mimetype, template_name, **context):
         template      = self.metadata_jinja.get_template (template_name)
-        return self.response (template.render( **context ),
-                              mimetype=mimetype)
+        return self.response (template.render(**context), mimetype=mimetype)
 
     def __dispatch_request (self, request):
         adapter = self.url_map.bind_to_environ(request.environ)
@@ -459,10 +467,6 @@ class ApiServer:
                 elif "redirect-to" in page:
                     # Handle redirect
                     return redirect(location=page["redirect-to"], code=page["code"])
-                else:
-                    self.log.debug ("Static page nor redirect found in entry.")
-            else:
-                self.log.debug ("No static page entry for '%s'.", request.path)
 
             return self.error_404 (request)
         except BadRequest as error:
@@ -484,13 +488,14 @@ class ApiServer:
     def __send_templated_email (self, email_addresses, subject, template_name, **context):
         """Procedure to send an email according to a template to the list of EMAIL_ADDRESSES."""
 
-        if not self.email.is_properly_configured ():
-            return False
-
-        if not email_addresses:
+        if not email_addresses or not self.email.is_properly_configured ():
             return False
 
         for email_address in email_addresses:
+            if not self.db.may_receive_email_notifications (email_address):
+                self.log.info ("Did not send e-mail to '%s' due to settings.", email_address)
+                continue
+
             text, html = self.__render_email_templates (f"email/{template_name}",
                                                         recipient_email=email_address,
                                                         **context)
@@ -596,6 +601,19 @@ class ApiServer:
         response.status_code = 410
         return response
 
+    def error_413 (self, request, maximum_length):
+        """Procedure to respond with HTTP 413."""
+        response = None
+        if self.accepts_json (request):
+            response = self.response (json.dumps({
+                "message": f"Maximum upload size is {maximum_length}."
+            }))
+        else:
+            response = self.response (f"Maximum upload size is {maximum_length}.",
+                                      mimetype="text/plain")
+        response.status_code = 413
+        return response
+
     def error_415 (self, allowed_types):
         """Procedure to respond with HTTP 415."""
         response = self.response (f"Supported Content-Types: {allowed_types}",
@@ -629,18 +647,34 @@ class ApiServer:
         response.status_code = 403
         return response
 
-    def default_error_handling (self, request, method, content_type):
+    def default_error_handling (self, request, methods, content_type):
         """Procedure to handle both method and content type mismatches."""
-        if (request.method != method and
-            (not (method == "GET" and request.method == "HEAD"))):
-            return self.error_405 (method)
+        if isinstance (methods, str):
+            methods = [methods]
+
+        if (request.method not in methods and
+            (not ("GET" in methods and request.method == "HEAD"))):
+            return self.error_405 (methods)
 
         if not self.accepts_content_type (request, content_type, strict=False):
             return self.error_406 (content_type)
 
         return None
 
-    def response (self, content, mimetype='application/json; charset=utf-8'):
+    def default_authenticated_error_handling (self, request, methods, content_type):
+        """Procedure to handle method and content type mismatches as well authentication."""
+
+        handler = self.default_error_handling (request, methods, content_type)
+        if handler is not None:
+            return handler
+
+        account_uuid = self.account_uuid_from_request (request)
+        if account_uuid is None:
+            return self.error_authorization_failed (request)
+
+        return account_uuid
+
+    def response (self, content, mimetype='application/json'):
         """Returns a self.response object with some tweaks."""
 
         output                   = Response(content, mimetype=mimetype)
@@ -900,6 +934,39 @@ class ApiServer:
         dataset["git_uuid"] = git_uuid
         return True
 
+    def __export_report_in_format (self, request, report_name, report_data, report_format):
+        """Exports a report in a given format."""
+        if not report_data:
+            return self.error_400 (request, "Report data is empty", 400)
+
+        if report_format == "csv":
+            if isinstance(report_data, list) and isinstance(report_data[0], dict):
+                # dicts in report_data sometimes have different keys.
+                # Therefore, all keys need to be collected.
+                fieldnames = set()
+                for row in report_data:
+                    fieldnames.update(row.keys())
+                fieldnames = sorted(fieldnames)
+            else:
+                return self.error_400 (request, "Report data's format is unknown", 400)
+
+            inmemory_file = StringIO()
+            writer = csv.DictWriter(inmemory_file, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in report_data:
+                writer.writerow(row)
+
+            report_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}-{report_name}"
+            output = self.response (inmemory_file.getvalue(), mimetype="text/csv")
+            output.headers["Content-disposition"] = f"attachment; filename={report_name}.csv"
+            return output
+
+        if report_format == "json":
+            return self.response (json.dumps(report_data))
+
+        self.log.error ("Unknown report format '%s'.", report_format)
+        return self.error_400 (request, "Unknown report format.", 400)
+
     ## AUTHENTICATION HANDLERS
     ## ------------------------------------------------------------------------
 
@@ -928,11 +995,10 @@ class ApiServer:
                 return response.json()
 
             self.log.error ("ORCID response was %d", response.status_code)
-            return None
-
         except validator.ValidationException:
             self.log.error ("ORCID parameter validation error")
-            return None
+
+        return None
 
     def __request_to_saml_request (self, request):
         """Turns a werkzeug request into one that python3-saml understands."""
@@ -1121,7 +1187,7 @@ class ApiServer:
                     return impersonate
 
         except (KeyError, IndexError, TypeError):
-            return account["uuid"]
+            pass
 
         return account["uuid"]
 
@@ -1133,7 +1199,7 @@ class ApiServer:
         ## Match the token to an account_uuid.  If the token does not
         ## exist, we cannot authenticate.
         try:
-            account    = self.db.account_by_session_token (token)
+            account  = self.db.account_by_session_token (token)
             if account is None:
                 return None
             if allow_impersonation:
@@ -1248,10 +1314,20 @@ class ApiServer:
         """Implements /login."""
 
         account_uuid = None
+        account      = None
+
+        ## Automatic log in for development purposes only.
+        ## --------------------------------------------------------------------
+        if self.automatic_login_email is not None and not self.in_production:
+            account = self.db.account_by_email (self.automatic_login_email)
+            if account is None:
+                return self.error_403 (request)
+            account_uuid = account["uuid"]
+            self.log.access ("Account %s logged in via auto-login.", account_uuid) #  pylint: disable=no-member
 
         ## ORCID authentication
         ## --------------------------------------------------------------------
-        if self.identity_provider == "orcid":
+        elif self.identity_provider == "orcid":
             orcid_record = self.authenticate_using_orcid (request)
             if orcid_record is None:
                 return self.error_403 (request)
@@ -1261,9 +1337,33 @@ class ApiServer:
 
             account_uuid = self.db.account_uuid_by_orcid (orcid_record['orcid'])
             if account_uuid is None:
-                return self.error_403 (request)
+                try:
+                    email = f"{orcid_record['orcid']}@orcid"
+                    account_uuid = self.db.insert_account (
+                        # We don't receive the user's e-mail address,
+                        # so we construct an artificial one that doesn't
+                        # resolve so no accidental e-mails will be sent.
+                        email      = email,
+                        full_name  = orcid_record["name"]
+                    )
+                    if not account_uuid:
+                        return self.error_500 ()
 
-            self.log.access ("Account %s logged in via ORCID.", account_uuid) #  pylint: disable=no-member
+                    self.log.access ("Account %s created via ORCID.", account_uuid) #  pylint: disable=no-member
+                    author_uuid = self.db.insert_author (
+                        email        = email,
+                        account_uuid = account_uuid,
+                        orcid_id     = orcid_record['orcid'],
+                        is_active    = True,
+                        is_public    = True)
+                    if not author_uuid:
+                        self.log.error ("Failed to link author to new account for %s.", email)
+                        return self.error_500 ()
+                except KeyError:
+                    self.log.error ("Received an unexpected record from ORCID.")
+                    return self.error_403 (request)
+            else:
+                self.log.access ("Account %s logged in via ORCID.", account_uuid) #  pylint: disable=no-member
 
         ## SAML 2.0 authentication
         ## --------------------------------------------------------------------
@@ -1291,7 +1391,6 @@ class ApiServer:
                         return self.error_400 (request, "Invalid request", "MissingEmailProperty")
 
                     account = self.db.account_by_email (saml_record["email"])
-                    account_uuid = None
                     if account:
                         account_uuid = account["uuid"]
                         self.log.access ("Account %s logged in via SAML.", account_uuid) #  pylint: disable=no-member
@@ -1311,6 +1410,10 @@ class ApiServer:
 
         if account_uuid is not None:
             token, mfa_token, session_uuid = self.db.insert_session (account_uuid, name="Website login")
+            if session_uuid is None:
+                self.log.error ("Failed to create a session for account %s.", account_uuid)
+                return self.error_500 ()
+
             self.log.access ("Created session %s for account %s.", session_uuid, account_uuid) #  pylint: disable=no-member
 
             if mfa_token is None:
@@ -1319,7 +1422,8 @@ class ApiServer:
                 return response
 
             ## Send e-mail
-            account = self.db.account_by_uuid (account_uuid)
+            if account is None:
+                account = self.db.account_by_uuid (account_uuid)
             self.__send_templated_email (
                 [account["email"]],
                 "Two-factor authentication log-in token",
@@ -1653,44 +1757,39 @@ class ApiServer:
 
     def ui_dataset_private_links (self, request, dataset_uuid):
         """Implements /my/datasets/<uuid>/private_links."""
-        if not self.accepts_html (request):
-            return self.error_406 ("text/html")
 
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed (request)
+        account_uuid = self.default_authenticated_error_handling (request, "GET", "text/html")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
-        if request.method in ("GET", "HEAD"):
-            if not validator.is_valid_uuid (dataset_uuid):
-                return self.error_404 (request)
+        if not validator.is_valid_uuid (dataset_uuid):
+            return self.error_404 (request)
 
-            try:
-                dataset = self.db.datasets (dataset_uuid = dataset_uuid,
-                                            account_uuid = account_uuid,
-                                            is_published = None,
-                                            is_latest    = None,
-                                            limit        = 1)[0]
-            except IndexError:
-                return self.error_403 (request)
+        try:
+            dataset = self.db.datasets (dataset_uuid = dataset_uuid,
+                                        account_uuid = account_uuid,
+                                        is_published = None,
+                                        is_latest    = None,
+                                        limit        = 1)[0]
+        except IndexError:
+            return self.error_403 (request)
 
-            if not dataset:
-                return self.error_404 (request)
+        if not dataset:
+            return self.error_404 (request)
 
-            links = self.db.private_links (item_uri     = dataset["uri"],
-                                           account_uuid = account_uuid)
+        links = self.db.private_links (item_uri     = dataset["uri"],
+                                       account_uuid = account_uuid)
 
-            for link in links:
-                link["is_expired"] = False
-                if "expires_date" in link:
-                    if datetime.fromisoformat(link["expires_date"]) < datetime.now():
-                        link["is_expired"] = True
+        for link in links:
+            link["is_expired"] = False
+            if "expires_date" in link:
+                if datetime.fromisoformat(link["expires_date"]) < datetime.now():
+                    link["is_expired"] = True
 
-            return self.__render_template (request,
-                                           "depositor/dataset-private-links.html",
-                                           dataset       = dataset,
-                                           private_links = links)
-
-        return self.error_500()
+        return self.__render_template (request,
+                                       "depositor/dataset-private-links.html",
+                                       dataset       = dataset,
+                                       private_links = links)
 
     def ui_collection_private_links (self, request, collection_uuid):
         """Implements /my/collections/<uuid>/private_links."""
@@ -2292,41 +2391,6 @@ class ApiServer:
 
         return redirect ("/my/profile", 302)
 
-    def ui_review_dashboard (self, request):
-        """Implements /review/dashboard."""
-        if not self.accepts_html (request):
-            return self.error_406 ("text/html")
-
-        account_uuid, error_response = self.__reviewer_account_uuid (request)
-        if error_response is not None:
-            return error_response
-
-        unassigned = self.db.reviews (limit       = 10000,
-                                      assigned_to = None,
-                                      status      = "unassigned",
-                                      order       = "review_submit_date",
-                                      order_direction = "desc")
-        assigned   = self.db.reviews (assigned_to = account_uuid,
-                                      limit       = 10000,
-                                      status      = "assigned",
-                                      order       = "review_submit_date",
-                                      order_direction = "desc")
-        published  = self.db.reviews (assigned_to = account_uuid,
-                                      limit       = 10,
-                                      status      = "approved",
-                                      order       = "published_date",
-                                      order_direction = "desc")
-        declined   = self.db.reviews (assigned_to = account_uuid,
-                                      limit       = 10,
-                                      status      = "rejected",
-                                      order       = "declined_date",
-                                      order_direction = "desc")
-        return self.__render_template (request, "review/dashboard.html",
-                                       assigned_reviews   = assigned,
-                                       unassigned_reviews = unassigned,
-                                       published_reviews  = published,
-                                       declined_reviews   = declined)
-
     def ui_review_overview (self, request):
         """Implements /review/overview."""
         if not self.accepts_html (request):
@@ -2449,6 +2513,72 @@ class ApiServer:
 
         return self.__render_template (request, "admin/exploratory.html")
 
+    def ui_admin_sparql (self, request):
+        """Implements /admin/sparql."""
+
+        token = self.token_from_cookie (request)
+        if not self.db.may_query (token):
+            return self.error_403 (request)
+
+        if request.method == "GET":
+            return self.__render_template (request, "admin/sparql.html")
+
+        if request.method == "POST":
+            query  = request.get_data().decode("utf-8")
+            output = self.db.run_query (query, token)
+            return self.response (json.dumps(output, indent=True))
+
+        return self.error_500 ()
+
+    def ui_admin_reports (self, request):
+        """Implements /admin/reports."""
+        if not self.accepts_html (request):
+            return self.error_406 ("text/html")
+
+        token = self.token_from_cookie (request)
+        if not self.db.may_administer (token):
+            return self.error_403 (request)
+
+        return self.__render_template (request, "admin/reports/dashboard.html")
+
+    def ui_admin_reports_restricted_datasets (self, request):
+        """Implements /admin/reports/restricted_datasets."""
+        if not self.accepts_html (request):
+            return self.error_406 ("text/html")
+
+        token = self.token_from_cookie (request)
+        if not self.db.may_administer (token):
+            return self.error_403 (request)
+
+        restricted_datasets = self.db.datasets(is_restricted=True, limit=10000, is_latest=True, use_cache=False)
+
+        export = self.get_parameter (request, "export")
+        fileformat = self.get_parameter (request, "format")
+
+        if export and fileformat:
+            return self.__export_report_in_format (request, "restricted_datasets", restricted_datasets, fileformat)
+
+        return self.__render_template (request, "admin/reports/restricted_datasets.html", datasets=restricted_datasets)
+
+    def ui_admin_reports_embargoed_datasets (self, request):
+        """Implements /admin/reports/embargoed_datasets."""
+        if not self.accepts_html (request):
+            return self.error_406 ("text/html")
+
+        token = self.token_from_cookie (request)
+        if not self.db.may_administer (token):
+            return self.error_403 (request)
+
+        embargoed_datasets = self.db.datasets(is_embargoed=True, limit=10000, is_latest=True, use_cache=False)
+
+        export = self.get_parameter (request, "export")
+        fileformat = self.get_parameter (request, "format")
+
+        if export and fileformat:
+            return self.__export_report_in_format (request, "embargoed_datasets", embargoed_datasets, fileformat)
+
+        return self.__render_template (request, "admin/reports/embargoed_datasets.html", datasets=embargoed_datasets)
+
     def ui_admin_maintenance (self, request):
         """Implements /admin/maintenance."""
         if not self.accepts_html (request):
@@ -2467,6 +2597,19 @@ class ApiServer:
             self.log.info ("Invalidating caches.")
             self.db.cache.invalidate_all ()
             return self.respond_204 ()
+
+        return self.error_403 (request)
+
+    def ui_admin_recalculate_statistics (self, request):
+        """Implements /admin/maintenance/recalculate-statistics."""
+        token = self.token_from_cookie (request)
+        if self.db.may_administer (token):
+            if self.db.update_view_and_download_counts ():
+                self.log.info ("Recalculated statistics.")
+                return self.respond_204 ()
+
+            self.log.error ("Failed to recalculate statistics.")
+            return self.error_500 ()
 
         return self.error_403 (request)
 
@@ -2786,6 +2929,7 @@ class ApiServer:
         if not private_view:
             self.__log_event (request, dataset["container_uuid"], "dataset", "view")
 
+        defined_type_name = value_or (dataset, 'defined_type_name', 'dataset')
         return self.__render_template (request, "dataset.html",
                                        item=dataset,
                                        version=version,
@@ -2816,7 +2960,7 @@ class ApiServer:
                                        my_email=my_email,
                                        my_name=my_name,
                                        is_own_item=is_own_item,
-                                       page_title=f"{dataset['title']} ({dataset['defined_type_name']})")
+                                       page_title=f"{dataset['title']} ({defined_type_name})")
 
     def ui_data_access_request (self, request):
         """Implements /data_access_request."""
@@ -3137,8 +3281,7 @@ class ApiServer:
                                                       private_view=True)
             else:
                 self.log.info ("File %s accessed through private link.", file_id)
-                metadata = self.__file_by_id_or_uri (file_id,
-                                                     private_view=True)
+                metadata = self.__file_by_id_or_uri (file_id, private_view=True)
 
             return dataset, metadata
 
@@ -3337,7 +3480,10 @@ class ApiServer:
                         search_dict[field_name] = search_term
                     search_list[idx] = search_dict
 
-            dataset_count = self.db.datasets (search_for=search_list, is_published=True, return_count=True)
+            dataset_count = self.db.datasets (search_for=search_list,
+                                              is_published=True,
+                                              is_latest=True,
+                                              return_count=True)
             if dataset_count == []:
                 message = "Invalid query"
                 datasets = []
@@ -3345,7 +3491,10 @@ class ApiServer:
             else:
                 message = None
                 dataset_count = dataset_count[0]["datasets"]
-                datasets = self.db.datasets (search_for=search_list, is_published=True, limit=100)
+                datasets = self.db.datasets (search_for=search_list,
+                                             is_published=True,
+                                             is_latest=True,
+                                             limit=100)
             return self.__render_template (request, "search.html",
                                            search_for=search_for,
                                            articles=datasets,
@@ -3365,15 +3514,9 @@ class ApiServer:
 
     def api_private_institution (self, request):
         """Implements /v2/account/institution."""
-        handler = self.default_error_handling (request, "GET", "application/json")
-        if handler is not None:
-            return handler
-
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request, "GET", "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         ## Our API only contains data from 4TU.ResearchData.
         return self.response (json.dumps({
@@ -3410,15 +3553,9 @@ class ApiServer:
 
     def api_private_institution_account (self, request, account_uuid):
         """Implements /v2/account/institution/users/<id>."""
-        handler = self.default_error_handling (request, "GET", "application/json")
-        if handler is not None:
-            return handler
-
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request, "GET", "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         account   = self.db.account_by_uuid (account_uuid)
         formatted = formatter.format_account_record(account)
@@ -3515,7 +3652,7 @@ class ApiServer:
                                                                      funding_list,
                                                                      references)
             # ugly fix for custom field Derived From
-            custom = total['custom_fields']
+            custom = value_or (total, "custom_fields", [])
             custom = [c for c in custom if c['name'] != 'Derived From']
             custom.append( {"name": "Derived From",
                             "value": self.db.derived_from(item_uri=dataset_uri)} )
@@ -3675,14 +3812,11 @@ class ApiServer:
 
     def api_private_datasets (self, request):
         """Implements /v2/account/articles."""
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
-
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "POST"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         if request.method in ("GET", "HEAD"):
             try:
@@ -3742,18 +3876,15 @@ class ApiServer:
             except validator.ValidationException as error:
                 return self.error_400 (request, error.message, error.code)
 
-        return self.error_405 (["GET", "POST"])
+        return self.error_500 ()
 
     def api_private_dataset_details (self, request, dataset_id):
         """Implements /v2/account/articles/<id>."""
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
-
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "PUT", "DELETE"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         if request.method in ("GET", "HEAD"):
             try:
@@ -3785,7 +3916,7 @@ class ApiServer:
                                                                            references,
                                                                            is_private=True)
                 # ugly fix for custom field Derived From
-                custom = total['custom_fields']
+                custom = value_or (total, "custom_fields", [])
                 custom = [c for c in custom if c['name'] != 'Derived From']
                 custom.append( {"name": "Derived From",
                                 "value": self.db.derived_from(item_uri=dataset_uri)} )
@@ -3892,19 +4023,16 @@ class ApiServer:
 
             return self.error_500 ()
 
-        return self.error_405 (["GET", "PUT", "DELETE"])
+        return self.error_500 ()
 
     def api_private_dataset_authors (self, request, dataset_id):
         """Implements /v2/account/articles/<id>/authors."""
 
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
-
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "POST", "PUT"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         if request.method in ("GET", "HEAD"):
             try:
@@ -3990,7 +4118,7 @@ class ApiServer:
             except validator.ValidationException as error:
                 return self.error_400 (request, error.message, error.code)
 
-        return self.error_405 ("GET")
+        return self.error_500 ()
 
     def api_private_dataset_author_delete (self, request, dataset_id, author_id):
         """Implements /v2/account/articles/<id>/authors/<a_id>."""
@@ -4035,18 +4163,11 @@ class ApiServer:
                                     item_by_id_procedure):
         """Implements handling funding for both datasets and collections."""
 
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
-
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
-
-        accepted_methods = ["GET", "POST", "PUT"]
-        if request.method not in accepted_methods:
-            return self.error_405 (accepted_methods)
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "POST", "PUT"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         if request.method in ("GET", "HEAD"):
             try:
@@ -4249,7 +4370,8 @@ class ApiServer:
             if collection is None or dataset is None:
                 return self.error_404 (request)
 
-            datasets = self.db.datasets(collection_uri=collection["uri"], is_latest=True)
+            self.locks.lock (locks.LockTypes.DATASET_LIST)
+            datasets = self.db.datasets(collection_uri=collection["uri"], is_latest=True, limit=10000)
             datasets.remove (next
                              (filter
                               (lambda item: item["container_uuid"] == dataset["container_uuid"],
@@ -4263,22 +4385,21 @@ class ApiServer:
                                          datasets,
                                          "datasets"):
                 self.db.cache.invalidate_by_prefix ("datasets")
+                self.locks.unlock (locks.LockTypes.DATASET_LIST)
                 return self.respond_204()
         except (IndexError, KeyError):
             return self.error_500 ()
 
+        self.locks.unlock (locks.LockTypes.DATASET_LIST)
         return self.error_403 (request)
 
     def api_private_dataset_categories (self, request, dataset_id):
         """Implements /v2/account/articles/<id>/categories."""
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
-
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "POST", "PUT"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         if request.method in ("GET", "HEAD"):
             try:
@@ -4346,15 +4467,13 @@ class ApiServer:
             except validator.ValidationException as error:
                 return self.error_400 (request, error.message, error.code)
 
-        return self.error_405 (["GET", "POST", "PUT"])
+        return self.error_500 ()
 
     def api_private_delete_dataset_category (self, request, dataset_id, category_id):
         """Implements /v2/account/articles/<id>/categories/<cid>."""
         if not self.accepts_json(request):
             return self.error_406 ("application/json")
 
-        ## Authorization
-        ## ----------------------------------------------------------------
         account_uuid = self.account_uuid_from_request (request)
         if account_uuid is None:
             return self.error_authorization_failed(request)
@@ -4366,14 +4485,12 @@ class ApiServer:
 
     def api_private_dataset_embargo (self, request, dataset_id):
         """Implements /v2/account/articles/<id>/embargo."""
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
 
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "DELETE"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         if request.method in ("GET", "HEAD"):
             dataset = self.__dataset_by_id_or_uri (dataset_id,
@@ -4398,18 +4515,15 @@ class ApiServer:
 
             return self.error_500 ()
 
-        return self.error_405 (["GET", "DELETE"])
+        return self.error_500 ()
 
     def api_private_dataset_files (self, request, dataset_id):
         """Implements /v2/account/articles/<id>/files."""
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
-
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "POST"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         if request.method in ("GET", "HEAD"):
             try:
@@ -4482,18 +4596,15 @@ class ApiServer:
 
             return self.error_500 ()
 
-        return self.error_405 (["GET", "POST"])
+        return self.error_500 ()
 
     def api_private_dataset_file_details (self, request, dataset_id, file_id):
         """Implements /v2/account/articles/<id>/files/<fid>."""
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
-
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "POST", "DELETE"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         if request.method in ("GET", "HEAD"):
             try:
@@ -4501,12 +4612,14 @@ class ApiServer:
                                                        account_uuid = account_uuid,
                                                        is_published = False)
 
-                files   = self.__file_by_id_or_uri (file_id,
-                                                    account_uuid = account_uuid,
-                                                    dataset_uri = dataset["uri"])
+                if dataset is None:
+                    return self.error_404 (request)
 
-                return self.default_list_response (files, formatter.format_file_details_record,
-                                                   base_url = self.base_url)
+                metadata = self.__file_by_id_or_uri (file_id,
+                                                     account_uuid = account_uuid,
+                                                     dataset_uri = dataset["uri"])
+                metadata["base_url"] = self.base_url
+                return self.response (json.dumps (formatter.format_file_details_record (metadata)))
             except (IndexError, KeyError):
                 pass
 
@@ -4537,6 +4650,7 @@ class ApiServer:
                                              "files"):
 
                     self.locks.unlock (locks.LockTypes.FILE_LIST)
+                    self.db.cache.invalidate_by_prefix (f"{account_uuid}_storage")
                     self.db.cache.invalidate_by_prefix (f"{dataset['uuid']}_dataset_storage")
                     return self.respond_204()
 
@@ -4546,18 +4660,16 @@ class ApiServer:
             self.locks.unlock (locks.LockTypes.FILE_LIST)
             return self.error_500()
 
-        return self.error_405 (["GET", "POST", "DELETE"])
+        return self.error_500 ()
 
     def api_private_dataset_private_links (self, request, dataset_id):
         """Implements /v2/account/articles/<id>/private_links."""
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
 
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "POST"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         if request.method in ("GET", "HEAD"):
 
@@ -4628,14 +4740,12 @@ class ApiServer:
 
     def api_private_dataset_private_links_details (self, request, dataset_id, link_id):
         """Implements /v2/account/articles/<id>/private_links/<link_id>."""
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
 
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "PUT", "DELETE"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         dataset = self.__dataset_by_id_or_uri (dataset_id,
                                                account_uuid = account_uuid,
@@ -4708,7 +4818,8 @@ class ApiServer:
             if response.status_code in (201, 422): #422:already reserved
                 data = response.json()
             else:
-                self.log.error ("DataCite responded with %s", response.status_code)
+                self.log.error ("DataCite responded with %s (%s)",
+                                response.status_code, response.text)
             return data
         except requests.exceptions.ConnectionError:
             self.log.error ("Failed to reserve a DOI due to a connection error.")
@@ -4718,13 +4829,10 @@ class ApiServer:
     def api_private_collection_reserve_doi (self, request, collection_id):
         """Implements /v2/account/collections/<id>/reserve_doi."""
 
-        handler = self.default_error_handling (request, "POST", "application/json")
-        if handler is not None:
-            return handler
-
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request, "POST",
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         collection = self.__collection_by_id_or_uri (collection_id,
                                                      is_published = False,
@@ -4779,6 +4887,16 @@ class ApiServer:
                 if self.db.update_dataset (
                         item["uuid"],
                         account_uuid,
+                        time_coverage               = value_or_none (item, "time_coverage"),
+                        publisher                   = value_or_none (item, "publisher"),
+                        mimetype                    = value_or_none (item, "format"),
+                        contributors                = value_or_none (item, "contributors"),
+                        geolocation                 = value_or_none (item, "geolocation"),
+                        longitude                   = value_or_none (item, "longitude"),
+                        latitude                    = value_or_none (item, "latitude"),
+                        data_link                   = value_or_none (item, "data_link"),
+                        same_as                     = value_or_none (item, "same_as"),
+                        organizations               = value_or_none (item, "organizations"),
                         resource_title              = value_or_none (item, "resource_title"),
                         resource_doi                = value_or_none (item, "resource_doi"),
                         agreed_to_deposit_agreement = value_or (item, "agreed_to_deposit_agreement", False),
@@ -4801,13 +4919,11 @@ class ApiServer:
 
     def api_private_dataset_reserve_doi (self, request, dataset_id):
         """Implements /v2/account/articles/<id>/reserve_doi."""
-        handler = self.default_error_handling (request, "POST", "application/json")
-        if handler is not None:
-            return handler
 
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request, "POST",
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         dataset = self.__dataset_by_id_or_uri (dataset_id,
                                                is_published = False,
@@ -4822,10 +4938,10 @@ class ApiServer:
 
         return self.error_500()
 
-    def __update_item_doi (self, item_id, version=None, item_type="dataset"):
+    def __update_item_doi (self, item_id, version=None, item_type="dataset", from_draft=True):
         """Procedure to modify metadata of an existing doi."""
 
-        doi, xml = self.format_datacite_for_registration (item_id, version, item_type)
+        doi, xml = self.format_datacite_for_registration (item_id, version, item_type, from_draft)
 
         encoded_bytes = base64.b64encode(xml.encode("utf-8"))
 
@@ -4857,7 +4973,8 @@ class ApiServer:
                 self.log.warning ("Doi %s already active, updated", doi)
                 return True
 
-            self.log.error ("DataCite responded with %s", response.status_code)
+            self.log.error ("DataCite responded with %s (%s)",
+                            response.status_code, response.text)
         except requests.exceptions.ConnectionError:
             self.log.error ("Failed to update a DOI due to a connection error.")
 
@@ -4865,15 +4982,10 @@ class ApiServer:
 
     def api_private_datasets_search (self, request):
         """Implements /v2/account/articles/search."""
-        handler = self.default_error_handling (request, "POST", "application/json")
-        if handler is not None:
-            return handler
-
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request, "POST",
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         try:
             if not self.contains_json (request):
@@ -5028,14 +5140,12 @@ class ApiServer:
 
     def api_private_collections (self, request):
         """Implements /v2/collections/<id>/versions/<version>."""
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
 
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "POST"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         if request.method in ("GET", "HEAD"):
             ## Parameters
@@ -5116,19 +5226,16 @@ class ApiServer:
             except validator.ValidationException as error:
                 return self.error_400 (request, error.message, error.code)
 
-        return self.error_405 (["GET", "POST"])
-
+        return self.error_500 ()
 
     def api_private_collection_details (self, request, collection_id):
         """Implements /v2/account/collections/<id>."""
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
 
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "PUT", "DELETE"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         if request.method in ("GET", "HEAD"):
             try:
@@ -5206,15 +5313,11 @@ class ApiServer:
 
     def api_private_collections_search (self, request):
         """Implements /v2/account/collections/search."""
-        handler = self.default_error_handling (request, "POST", "application/json")
-        if handler is not None:
-            return handler
 
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request, "POST",
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         parameters = request.get_json()
         records = self.db.collections(
@@ -5242,14 +5345,11 @@ class ApiServer:
     def api_private_collection_authors (self, request, collection_id):
         """Implements /v2/account/collections/<id>/authors."""
 
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
-
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "POST", "PUT"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         if request.method in ("GET", "HEAD"):
             try:
@@ -5335,19 +5435,15 @@ class ApiServer:
             except validator.ValidationException as error:
                 return self.error_400 (request, error.message, error.code)
 
-        return self.error_405 ("GET")
+        return self.error_500 ()
 
     def api_private_collection_categories (self, request, collection_id):
         """Implements /v2/account/collections/<id>/categories."""
-        handler = self.default_error_handling (request, "GET", "application/json")
-        if handler is not None:
-            return handler
 
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request, "GET",
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         try:
             collection = self.__collection_by_id_or_uri (collection_id,
@@ -5368,12 +5464,12 @@ class ApiServer:
 
     def api_private_collection_datasets (self, request, collection_id):
         """Implements /v2/account/collections/<id>/articles."""
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
 
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "POST", "PUT"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         if request.method in ("GET", "HEAD"):
             try:
@@ -5384,12 +5480,18 @@ class ApiServer:
                 if collection is None:
                     return self.error_404 (request)
 
-                datasets   = self.db.datasets (collection_uri = collection["uri"], is_latest=True)
+                offset, limit = self.__paging_offset_and_limit (request)
+                datasets = self.db.datasets (collection_uri = collection["uri"],
+                                             is_latest      = True,
+                                             limit          = limit,
+                                             offset         = offset)
 
                 return self.default_list_response (datasets, formatter.format_dataset_record,
                                                    base_url = self.base_url)
             except (IndexError, KeyError):
                 pass
+            except validator.ValidationException as error:
+                return self.error_400 (request, error.message, error.code)
 
             return self.error_500 ()
 
@@ -5418,7 +5520,7 @@ class ApiServer:
                 if collection is None:
                     return self.error_404 (request)
 
-                existing_datasets = self.db.datasets(collection_uri=collection["uri"], is_latest=True)
+                existing_datasets = self.db.datasets(collection_uri=collection["uri"], is_latest=True, limit=10000)
                 if existing_datasets:
                     existing_datasets = list(map(lambda item: item["container_uuid"],
                                                  existing_datasets))
@@ -5459,7 +5561,7 @@ class ApiServer:
 
             return self.error_500()
 
-        return self.error_405 (["GET", "POST", "PUT"])
+        return self.error_500 ()
 
     def api_collection_datasets (self, request, collection_id):
         """Implements /v2/collections/<id>/articles."""
@@ -5488,13 +5590,11 @@ class ApiServer:
 
     def api_private_authors_search (self, request):
         """Implements /v2/account/authors/search."""
-        handler = self.default_error_handling (request, "POST", "application/json")
-        if handler is not None:
-            return handler
 
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request, "POST",
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         try:
             parameters = request.get_json()
@@ -5529,13 +5629,10 @@ class ApiServer:
 
     def api_private_funding_search (self, request):
         """Implements /v2/account/funding/search."""
-        handler = self.default_error_handling (request, "POST", "application/json")
-        if handler is not None:
-            return handler
-
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request, "POST",
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         try:
             parameters = request.get_json()
@@ -5733,12 +5830,23 @@ class ApiServer:
 
         branch_name = None
         # Get a previously set default.
-        head_reference = git_repository.references.get("refs/heads/master")
+        head_reference = git_repository.references.get("HEAD")
+        try:
+            head_reference = head_reference.resolve()
+        except pygit2.GitError as error:  # pylint: disable=no-member
+            self.log.error ("Failed to resolve git repository HEAD for '%s': %s",
+                            git_repository.path, error)
+            head_reference = None
+        except KeyError as error:
+            self.log.error ("HEAD points to non-existing branch for '%s': %s",
+                            git_repository.path, error)
+            head_reference = None
+
         if head_reference is not None:
             try:
-                target = head_reference.target
-                if target.startswith ("refs/heads/"):
-                    branch_name = target[11:]
+                name = head_reference.name
+                if name.startswith ("refs/heads/"):
+                    branch_name = name[11:]
             except AttributeError:
                 pass
 
@@ -5783,15 +5891,11 @@ class ApiServer:
     def __git_set_default_branch (self, git_repository, branch_name):
         """Sets the default branch for a git repository."""
 
-        # Remove existing default branch choice.
-        if git_repository.references.get("refs/heads/master") is not None:
-            self.log.info ("Removed default branch for '%s'.", git_repository.path)
-            git_repository.references.delete ("refs/heads/master")
+        if branch_name is None:
+            return False
 
-        # Create a default reference.
         try:
-            git_repository.references.create ("refs/heads/master",
-                                              f"refs/heads/{branch_name}")
+            git_repository.set_head (f"refs/heads/{branch_name}")
             git_repository.references.compress()
             self.log.info ("Set default branch to '%s' for %s.",
                            branch_name, git_repository.path)
@@ -5861,17 +5965,16 @@ class ApiServer:
         if git_repository is None:
             return self.error_404 (request)
 
-        branches       = list(git_repository.branches.local)
-        files          = []
-        if branches:
-            branch_name = branches[0]
-            if "master" in branches:
-                branch_name = "master"
-            elif "main" in branches:
-                branch_name = "main"
-
-            files = git_repository.revparse_single(branch_name).tree
-            files = [e.name for e in files]
+        branch_name    = self.__git_repository_default_branch_guess (git_repository)
+        files = []
+        if branch_name:
+            try:
+                files = git_repository.revparse_single(branch_name).tree
+                files = [e.name for e in files]
+            except pygit2.GitError as error:  # pylint: disable=no-member
+                self.log.error ("Failed to retrieve Git files for branch '%s' in '%s' due to: '%s'.",
+                                branch_name, git_repository.path, error)
+                return self.error_500 ()
 
         return self.response (json.dumps(files))
 
@@ -5968,13 +6071,10 @@ class ApiServer:
     def api_v3_collection_publish (self, request, collection_id):
         """Implements /v3/collections/<id>/publish."""
 
-        handler = self.default_error_handling (request, "POST", "application/json")
-        if handler is not None:
-            return handler
-
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed (request)
+        account_uuid = self.default_authenticated_error_handling (request, "POST",
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         collection = self.__collection_by_id_or_uri (collection_id,
                                                      account_uuid = account_uuid,
@@ -6060,13 +6160,11 @@ class ApiServer:
 
     def api_v3_dataset_submit (self, request, dataset_id):
         """Implements /v3/datasets/<id>/submit-for-review."""
-        handler = self.default_error_handling (request, "PUT", "application/json")
-        if handler is not None:
-            return handler
 
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request, "PUT",
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         self.locks.lock (locks.LockTypes.SUBMIT_DATASET)
         dataset = self.__dataset_by_id_or_uri (dataset_id,
@@ -6354,6 +6452,16 @@ class ApiServer:
         if account_uuid is None:
             return self.error_authorization_failed(request)
 
+        account = self.db.account_by_uuid (account_uuid)
+        if "quota" not in account:
+            self.log.error ("Account %s does not have an assigmed quota.", account_uuid)
+            return self.error_403 (request)
+
+        storage_used      = self.db.account_storage_used (account_uuid)
+        storage_available = account["quota"] - storage_used
+        if storage_available < 1:
+            return self.error_413 (request, 0)
+
         try:
             dataset   = self.__dataset_by_id_or_uri (dataset_id,
                                                      account_uuid=account_uuid,
@@ -6383,6 +6491,11 @@ class ApiServer:
                     request,
                     "Missing Content-Length header.",
                     "MissingContentLength")
+
+            # Note that the bytes_to_read contain some overhead of the
+            # multipart headings (~220 bytes per chunk).
+            if storage_available < bytes_to_read:
+                return self.error_413 (request, account["quota"])
 
             input_stream = request.stream
 
@@ -6424,7 +6537,7 @@ class ApiServer:
             except IndexError:
                 pass
 
-            headers_len        = len(part_headers)
+            headers_len        = len(part_headers.encode('utf-8'))
             computed_file_size = request.content_length - read_ahead_bytes - headers_len - len(expected_end)
             bytes_to_read      = bytes_to_read - read_ahead_bytes - headers_len
             content_to_read    = bytes_to_read - len(expected_end)
@@ -6520,13 +6633,11 @@ class ApiServer:
 
     def api_v3_file (self, request, file_id):
         """Implements /v3/file/<id>."""
-        handler = self.default_error_handling (request, "GET", "application/json")
-        if handler is not None:
-            return handler
 
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request, "GET",
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         metadata = self.__file_by_id_or_uri (file_id, account_uuid = account_uuid)
         if metadata is None:
@@ -6541,17 +6652,11 @@ class ApiServer:
     def __api_v3_item_references (self, request, item):
         """Implements getting/setting references for datasets and collections."""
 
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
-
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
-
-        if request.method not in ('GET', 'POST', 'DELETE'):
-            return self.error_405 (["GET", "POST", "DELETE"])
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "POST", "DELETE"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         try:
             references     = self.db.references (item_uri     = item["uri"],
@@ -6632,17 +6737,12 @@ class ApiServer:
 
     def __api_v3_item_tags (self, request, item_id, item_by_id_procedure):
         """Implements handling tags for both datasets and collections."""
-        if not self.accepts_json(request):
-            return self.error_406 ("application/json")
 
-        ## Authorization
-        ## ----------------------------------------------------------------
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
-
-        if request.method not in ('GET', 'POST', 'DELETE'):
-            return self.error_405 (["GET", "POST", "DELETE"])
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "POST", "DELETE"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         try:
             item  = item_by_id_procedure (item_id,
@@ -6864,9 +6964,12 @@ class ApiServer:
         try:
             dataset = None
             if validator.is_valid_uuid (git_uuid):
-                dataset = self.db.datasets (git_uuid = git_uuid)[0]
+                dataset = self.db.datasets (git_uuid     = git_uuid,
+                                            is_published = None,
+                                            is_latest    = None)[0]
 
             if dataset is not None:
+                self.__log_event (request, dataset["container_uuid"], "dataset", "gitDownload")
                 return self.__git_passthrough (request)
         except IndexError:
             pass
@@ -6876,13 +6979,10 @@ class ApiServer:
     def api_v3_profile (self, request):
         """Implements /v3/profile."""
 
-        handler = self.default_error_handling (request, "PUT", "application/json")
-        if handler is not None:
-            return handler
-
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request, "PUT",
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         try:
             record = request.get_json()
@@ -6918,13 +7018,10 @@ class ApiServer:
     def api_v3_profile_categories (self, request):
         """Implements /v3/profile/categories."""
 
-        handler = self.default_error_handling (request, "GET", "application/json")
-        if handler is not None:
-            return handler
-
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request, "GET",
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         categories = self.db.account_categories (account_uuid)
         return self.default_list_response (categories, formatter.format_category_record)
@@ -6932,13 +7029,10 @@ class ApiServer:
     def api_v3_profile_quota_request (self, request):
         """Implements /v3/profile/quota-request."""
 
-        handler = self.default_error_handling (request, "POST", "application/json")
-        if handler is not None:
-            return handler
-
-        account_uuid = self.account_uuid_from_request (request)
-        if account_uuid is None:
-            return self.error_authorization_failed(request)
+        account_uuid = self.default_authenticated_error_handling (request, "POST",
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
 
         try:
             parameters = request.get_json()
@@ -7146,6 +7240,9 @@ class ApiServer:
             current_version = value_or(container, 'latest_published_version_number', 0)
             if from_draft:
                 current_version += 1
+
+        item = None
+        published_date = None
         if from_draft:
             try:
                 item = items_function (container_uuid=container_uuid,
@@ -7153,17 +7250,20 @@ class ApiServer:
                 item['version'] = current_version
             except IndexError:
                 self.log.warning ("No draft for %s.", item_id)
-                return None
             published_date = date.today().isoformat()
         else:
             try:
                 item = items_function (container_uuid=container_uuid,
                                        version=current_version,
                                        is_published=True)[0]
+                if item is not None and "published_date" in item:
+                    published_date = item['published_date'][:10]
             except IndexError:
                 self.log.error("Nothing found for %s %s version %s.", item_type, item_id, current_version)
-                return self.error_500 ()
-            published_date = item['published_date'][:10]
+
+        if item is None:
+            return None
+
         item_uuid = item['uuid']
         item_uri = f'{item_type}:{item_uuid}'
         lat = self_or_value_or_none(item, 'latitude')
@@ -7186,7 +7286,7 @@ class ApiServer:
             'authors'       : self.db.authors(item_uri=item_uri, item_type=item_type),
             'categories'    : self.db.categories(item_uri=item_uri, limit=None),
             'tags'          : [tag['tag'] for tag in self.db.tags(item_uri=item_uri)],
-            'published_year': published_date[:4],
+            'published_year': published_date[:4] if published_date is not None else None,
             'published_date': published_date,
             'organizations' : self.parse_organizations(value_or(item, 'organizations', '')),
             'contributors'  : self.parse_contributors (value_or(item, 'contributors' , '')),
@@ -7214,7 +7314,7 @@ class ApiServer:
     def export_datacite (self, item_id, version=None, item_type="dataset"):
         """export metadata in datacite format"""
         xml_string = self.format_datacite(item_id, version, item_type=item_type)
-        output = self.response (xml_string, mimetype="application/xml; charset=utf-8")
+        output = self.response (xml_string, mimetype="application/xml")
         version_string = f'_v{version}' if version else ''
         output.headers["Content-disposition"] = f"attachment; filename={item_id}{version_string}_datacite.xml"
         return output
@@ -7224,9 +7324,9 @@ class ApiServer:
         parameters = self.__metadata_export_parameters(item_id, version, item_type=item_type)
         return xml_formatter.datacite(parameters, indent=indent)
 
-    def format_datacite_for_registration (self, item_id, version=None, item_type="dataset"):
+    def format_datacite_for_registration (self, item_id, version=None, item_type="dataset", from_draft=True):
         """return doi and un-indented datacite xml separately"""
-        parameters = self.__metadata_export_parameters(item_id, version, item_type=item_type, from_draft=True)
+        parameters = self.__metadata_export_parameters(item_id, version, item_type=item_type, from_draft=from_draft)
         xml = str(xml_formatter.datacite(parameters, indent=False), encoding='utf-8')
         xml = '<?xml version="1.0" encoding="UTF-8"?>' + xml.split('?>', 1)[1] #Datacite is very choosy about this
         return parameters["doi"], xml
@@ -7238,7 +7338,7 @@ class ApiServer:
 
         parameters = self.__metadata_export_parameters(dataset_id, version)
         xml_string = xml_formatter.refworks(parameters)
-        output = self.response (xml_string, mimetype="application/xml; charset=utf-8")
+        output = self.response (xml_string, mimetype="application/xml")
         version_string = f'_v{version}' if version else ''
         output.headers["Content-disposition"] = f"attachment; filename={dataset_id}{version_string}_refworks.xml"
         return output
@@ -7249,9 +7349,14 @@ class ApiServer:
             return self.error_406 ("application/xml")
 
         parameters = self.__metadata_export_parameters(dataset_id, version)
-        self.add_names_to_authors(parameters["authors"])
+        if parameters is None:
+            return self.error_404 (request)
+
+        if "authors" in parameters:
+            self.add_names_to_authors(parameters["authors"])
+
         xml_string = xml_formatter.nlm(parameters)
-        output = self.response (xml_string, mimetype="application/xml; charset=utf-8")
+        output = self.response (xml_string, mimetype="application/xml")
         version_string = f'_v{version}' if version else ''
         output.headers["Content-disposition"] = f"attachment; filename={dataset_id}{version_string}_nlm.xml"
         return output
@@ -7263,7 +7368,7 @@ class ApiServer:
 
         parameters = self.__metadata_export_parameters(dataset_id, version)
         xml_string = xml_formatter.dublincore(parameters)
-        output = self.response (xml_string, mimetype="application/xml; charset=utf-8")
+        output = self.response (xml_string, mimetype="application/xml")
         version_string = f'_v{version}' if version else ''
         output.headers["Content-disposition"] = f"attachment; filename={dataset_id}{version_string}_dublincore.xml"
         return output
@@ -7285,7 +7390,7 @@ class ApiServer:
 
         headers = {"Content-disposition": f"attachment; filename={parameters['item']['uuid']}.bib"}
         return self.__render_export_format(template_name="bibtex.bib",
-                                           mimetype="text/plain; charset=utf-8",
+                                           mimetype="text/plain",
                                            headers=headers, **parameters)
 
     def ui_export_refman_dataset (self, request, dataset_id, version=None):
@@ -7300,7 +7405,7 @@ class ApiServer:
 
         headers = {"Content-disposition": f"attachment; filename={parameters['item']['uuid']}.ris"}
         return self.__render_export_format(template_name="refman.ris",
-                                           mimetype="text/plain; charset=utf-8",
+                                           mimetype="text/plain",
                                            headers=headers, **parameters)
 
     def ui_export_endnote_dataset (self, request, dataset_id, version=None):
@@ -7319,7 +7424,7 @@ class ApiServer:
 
         headers = {"Content-disposition": f"attachment; filename={parameters['item']['uuid']}.enw"}
         return self.__render_export_format(template_name="endnote.enw",
-                                           mimetype="text/plain; charset=utf-8",
+                                           mimetype="text/plain",
                                            headers=headers, **parameters)
 
     def ui_export_cff_dataset (self, request, dataset_id, version=None):
@@ -7332,7 +7437,7 @@ class ApiServer:
         self.add_names_to_authors(parameters["authors"])
         headers = {"Content-disposition": f"attachment; filename={parameters['item']['uuid']}_citation.cff"}
         return self.__render_export_format(template_name="citation.cff",
-                                           mimetype="text/plain; charset=utf-8",
+                                           mimetype="text/plain",
                                            headers=headers, **parameters)
 
     def parse_organizations (self, text):
