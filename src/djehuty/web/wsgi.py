@@ -1749,6 +1749,10 @@ class ApiServer:
             if dataset is None:
                 return self.error_403 (request)
 
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_remove", False)):
+                return self.error_403 (request)
+
             container_uuid = dataset["container_uuid"]
             if self.db.delete_dataset_draft (container_uuid, dataset["uuid"], account_uuid):
                 return redirect ("/my/datasets", code=303)
