@@ -2127,7 +2127,7 @@ class ApiServer:
             return self.error_403(request)
 
         if dataset is None:
-           return self.error_403 (request)
+            return self.error_403 (request)
 
         if request.method == "GET":
             collaborators =  self.db.collaborators (dataset["uuid"])
@@ -2161,6 +2161,8 @@ class ApiServer:
                 return self.error_500()
 
             return self.respond_205()
+
+        return self.error_500 ()
 
     def api_v3_dataset_remove_collaborator(self, request, dataset_uuid, collaborator_uuid):
         """Removes the collaborator from the share section of edit dataset form."""
