@@ -19,6 +19,7 @@ WHERE {
     } UNION {
       ?dataset      djht:collaborators/rdf:rest*/rdf:first ?collaborator .
       ?collaborator djht:account <account:{{account_uuid}}> .
+      ?collaborator djht:metadata_remove "true"^^xsd:boolean .
     }
     ?dataset   ?predicate           ?object ;
                ?list_predicate      ?list .
