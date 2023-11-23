@@ -4015,6 +4015,10 @@ class ApiServer:
                                                            account_uuid=account_uuid,
                                                            is_published=False)
 
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_remove", False)):
+                    return self.error_403 (request)
+
                 container_uuid = dataset["container_uuid"]
                 if self.db.delete_dataset_draft (container_uuid, dataset["uuid"], account_uuid):
                     return self.respond_204()
