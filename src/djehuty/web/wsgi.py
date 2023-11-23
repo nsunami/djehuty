@@ -1696,6 +1696,10 @@ class ApiServer:
             if dataset is None:
                 return self.error_403 (request)
 
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_edit", False)):
+                return self.error_403 (request)
+
             # Pre-Djehuty datasets may not have a Git UUID. We therefore
             # assign one when needed.
             if "git_uuid" not in dataset:
@@ -2130,10 +2134,17 @@ class ApiServer:
             return self.error_403 (request)
 
         if request.method == "GET":
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_read", False)):
+                return self.error_403 (request)
+
             collaborators =  self.db.collaborators (dataset["uuid"])
             return self.default_list_response (collaborators, formatter.format_collaborator_record)
 
         if request.method == "POST":
+            if value_or (dataset, "is_shared_with_me", False):
+                return self.error_403 (request)
+
             parameters = request.get_json()
             self.log.info("parameters:%s", parameters)
             #later: dict validatie
@@ -2186,6 +2197,10 @@ class ApiServer:
                                      limit=1)
         if len(dataset) != 1:
             return self.error_403(request)
+
+        if not (not value_or (dataset, "is_shared_with_me", False) or
+                value_or (dataset, "metadata_edit", False)):
+            return self.error_403 (request)
 
         if self.db.remove_collaborator(dataset[0]["uuid"], collaborator_uuid) is None:
             return self.error_500()
@@ -3634,6 +3649,10 @@ class ApiServer:
         try:
             dataset         = self.__dataset_by_id_or_uri (dataset_id, account_uuid=None, is_latest=True)
 
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_read", False)):
+                return self.error_403 (request)
+
             # Passing along the base_url here to generate the API links.
             dataset["base_url"] = self.base_url
 
@@ -3898,6 +3917,10 @@ class ApiServer:
                 if dataset_uri is None:
                     return self.response ("[]")
 
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_read", False)):
+                    return self.error_403 (request)
+
                 dataset["doi"]  = self.__standard_doi (dataset["container_uuid"],
                                                        version = None,
                                                        container_doi = value_or_none (dataset, "container_doi"))
@@ -3948,6 +3971,10 @@ class ApiServer:
                                                        is_published = False)
 
                 if dataset is None:
+                    return self.error_403 (request)
+
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_edit", False)):
                     return self.error_403 (request)
 
                 is_embargoed = validator.boolean_value (record, "is_embargoed", when_none=False)
@@ -4046,6 +4073,10 @@ class ApiServer:
                                                        account_uuid=account_uuid,
                                                        is_published=False)
 
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_read", False)):
+                    return self.error_403 (request)
+
                 authors = self.db.authors (item_uri   = dataset["uri"],
                                            account_uuid = account_uuid,
                                            is_published = False,
@@ -4064,6 +4095,17 @@ class ApiServer:
             parameters = request.get_json()
 
             try:
+                dataset = self.__dataset_by_id_or_uri (dataset_id,
+                                                       account_uuid=account_uuid,
+                                                       is_published=False)
+
+                if dataset is None:
+                    return self.error_403 (request)
+
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_edit", False)):
+                    return self.error_403 (request)
+
                 new_authors = []
                 records     = parameters["authors"]
                 for record in records:
@@ -4087,10 +4129,6 @@ class ApiServer:
                             self.log.error ("Adding a single author failed.")
                             return self.error_500()
                     new_authors.append(URIRef(uuid_to_uri (author_uuid, "author")))
-
-                dataset = self.__dataset_by_id_or_uri (dataset_id,
-                                                       account_uuid=account_uuid,
-                                                       is_published=False)
 
                 # The PUT method overwrites the existing authors, so we can
                 # keep an empty starting list. For POST we must retrieve the
@@ -4143,6 +4181,10 @@ class ApiServer:
             if dataset is None:
                 return self.error_403 (request)
 
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_remove", False)):
+                return self.error_403 (request)
+
             authors = self.db.authors (item_uri     = dataset["uri"],
                                        account_uuid = account_uuid,
                                        is_published = False,
@@ -4184,6 +4226,10 @@ class ApiServer:
                 if item is None:
                     return self.error_403 (request)
 
+                if not (not value_or (item, "is_shared_with_me", False) or
+                        value_or (item, "metadata_read", False)):
+                    return self.error_403 (request)
+
                 funding = self.db.fundings (item_uri     = item["uri"],
                                             account_uuid = account_uuid,
                                             is_published = False,
@@ -4207,6 +4253,10 @@ class ApiServer:
                                              is_published=False)
 
                 if item is None:
+                    return self.error_403 (request)
+
+                if not (not value_or (item, "is_shared_with_me", False) or
+                        value_or (item, "metadata_edit", False)):
                     return self.error_403 (request)
 
                 new_fundings = []
@@ -4287,6 +4337,10 @@ class ApiServer:
                                            is_published = False)
 
             if item is None:
+                return self.error_403 (request)
+
+            if not (not value_or (item, "is_shared_with_me", False) or
+                    value_or (item, "metadata_remove", False)):
                 return self.error_403 (request)
 
             fundings = self.db.fundings (item_uri     = item["uri"],
@@ -4438,6 +4492,10 @@ class ApiServer:
                                                        account_uuid = account_uuid,
                                                        is_published = False)
 
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_edit", False)):
+                    return self.error_403 (request)
+
                 # First, validate all values passed by the user.
                 # This way, we can be as certain as we can be that performing
                 # a PUT will not end in having no categories associated with
@@ -4505,6 +4563,10 @@ class ApiServer:
             if not dataset:
                 return self.response ("[]")
 
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_read", False)):
+                return self.error_403 (request)
+
             return self.response (json.dumps (formatter.format_dataset_embargo_record (dataset)))
 
         if request.method == 'DELETE':
@@ -4512,6 +4574,10 @@ class ApiServer:
                 dataset = self.__dataset_by_id_or_uri (dataset_id,
                                                        account_uuid = account_uuid,
                                                        is_published = False)
+
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_remove", False)):
+                    return self.error_403 (request)
 
                 if self.db.delete_dataset_embargo (dataset_uri = dataset["uri"],
                                                    account_uuid = account_uuid):
@@ -4539,6 +4605,10 @@ class ApiServer:
                 if dataset is None:
                     return self.error_403 (request)
 
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_read", False)):
+                    return self.error_403 (request)
+
                 files = self.db.dataset_files (
                     dataset_uri = dataset["uri"],
                     account_uuid = account_uuid,
@@ -4563,6 +4633,10 @@ class ApiServer:
                                                        is_published=False)
 
                 if dataset is None:
+                    return self.error_403 (request)
+
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_edit", False)):
                     return self.error_403 (request)
 
                 if link is not None:
@@ -4621,6 +4695,10 @@ class ApiServer:
                 if dataset is None:
                     return self.error_404 (request)
 
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_read", False)):
+                    return self.error_403 (request)
+
                 metadata = self.__file_by_id_or_uri (file_id,
                                                      account_uuid = account_uuid,
                                                      dataset_uri = dataset["uri"])
@@ -4641,6 +4719,10 @@ class ApiServer:
                                                        is_published=False)
 
                 if dataset is None:
+                    return self.error_403 (request)
+
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_remove", False)):
                     return self.error_403 (request)
 
                 self.locks.lock (locks.LockTypes.FILE_LIST)
@@ -4686,6 +4768,10 @@ class ApiServer:
             if dataset is None:
                 return self.error_404 (request)
 
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_read", False)):
+                return self.error_403 (request)
+
             links = self.db.private_links (item_uri   = dataset["uri"],
                                            account_uuid = account_uuid)
 
@@ -4699,6 +4785,10 @@ class ApiServer:
                                                             account_uuid = account_uuid)
                 if dataset is None:
                     return self.error_404 (request)
+
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_edit", False)):
+                    return self.error_403 (request)
 
                 id_string = secrets.token_urlsafe()
                 expires_date = validator.date_value (parameters, "expires_date", False)
@@ -4761,6 +4851,11 @@ class ApiServer:
             return self.error_404 (request)
 
         if request.method in ("GET", "HEAD"):
+
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_read", False)):
+                return self.error_403 (request)
+
             links = self.db.private_links (
                         item_uri   = dataset["uri"],
                         id_string  = link_id,
@@ -4769,6 +4864,11 @@ class ApiServer:
             return self.default_list_response (links, formatter.format_private_links_record)
 
         if request.method == 'PUT':
+
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_edit", False)):
+                return self.error_403 (request)
+
             parameters = request.get_json()
             try:
                 result = self.db.update_private_link (
@@ -4789,6 +4889,11 @@ class ApiServer:
                 return self.error_400 (request, error.message, error.code)
 
         if request.method == 'DELETE':
+
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_remove", False)):
+                return self.error_403 (request)
+
             result = self.db.delete_private_links (dataset["container_uuid"],
                                                    account_uuid,
                                                    link_id)
@@ -4936,6 +5041,10 @@ class ApiServer:
                                                account_uuid = account_uuid)
 
         if dataset is None:
+            return self.error_403 (request)
+
+        if not (not value_or (dataset, "is_shared_with_me", False) or
+                value_or (dataset, "metadata_edit", False)):
             return self.error_403 (request)
 
         reserved_doi = self.__reserve_and_save_doi (account_uuid, dataset)
@@ -5869,7 +5978,7 @@ class ApiServer:
 
         return branch_name
 
-    def __git_repository_by_dataset_id (self, account_uuid, dataset_id):
+    def __git_repository_by_dataset_id (self, account_uuid, dataset_id, action="read"):
         """Deduplication for api_v3_datasets_git_[branches|files]."""
 
         dataset = self.__dataset_by_id_or_uri (dataset_id,
@@ -5878,6 +5987,10 @@ class ApiServer:
 
         if dataset is None:
             self.log.error ("No Git repository for dataset %s.", dataset_id)
+            return None
+
+        if not (not value_or (dataset, "is_shared_with_me", False) or
+                value_or (dataset, f"data_{action}", False)):
             return None
 
         # Pre-Djehuty datasets may not have a Git UUID. We therefore
@@ -5929,7 +6042,7 @@ class ApiServer:
         except validator.ValidationException as error:
             return self.error_400 (request, error.message, error.code)
 
-        git_repository = self.__git_repository_by_dataset_id (account_uuid, dataset_id)
+        git_repository = self.__git_repository_by_dataset_id (account_uuid, dataset_id, "edit")
         if git_repository is None:
             return self.error_404 (request)
 
@@ -5947,7 +6060,7 @@ class ApiServer:
         if account_uuid is None:
             return self.error_authorization_failed(request)
 
-        git_repository = self.__git_repository_by_dataset_id (account_uuid, dataset_id)
+        git_repository = self.__git_repository_by_dataset_id (account_uuid, dataset_id, "read")
         if git_repository is None:
             return self.error_404 (request)
 
@@ -5967,7 +6080,7 @@ class ApiServer:
         if account_uuid is None:
             return self.error_authorization_failed(request)
 
-        git_repository = self.__git_repository_by_dataset_id (account_uuid, dataset_id)
+        git_repository = self.__git_repository_by_dataset_id (account_uuid, dataset_id, "read")
         if git_repository is None:
             return self.error_404 (request)
 
@@ -6181,6 +6294,10 @@ class ApiServer:
         if dataset is None:
             self.locks.unlock (locks.LockTypes.SUBMIT_DATASET)
             return self.error_404 (request)
+
+        if not (not value_or (dataset, "is_shared_with_me", False) or
+                value_or (dataset, "metadata_edit", False)):
+            return self.error_403 (request)
 
         record = request.get_json()
         try:
@@ -6475,6 +6592,10 @@ class ApiServer:
             if dataset is None:
                 return self.error_403 (request)
 
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "data_edit", False)):
+                return self.error_403 (request)
+
             content_type = value_or (request.headers, "Content-Type", "")
             if not content_type.startswith ("multipart/form-data"):
                 return self.error_415 (["multipart/form-data"])
@@ -6649,6 +6770,10 @@ class ApiServer:
         if metadata is None:
             return self.error_404 (request)
 
+        if not (not value_or (metadata, "is_shared_with_me", False) or
+                value_or (metadata, "data_read", False)):
+            return self.error_403 (request)
+
         try:
             metadata["base_url"] = self.base_url
             return self.response (json.dumps (formatter.format_file_details_record (metadata)))
@@ -6726,6 +6851,10 @@ class ApiServer:
                                                account_uuid=account_uuid,
                                                is_published=False)
 
+        if not (not value_or (dataset, "is_shared_with_me", False) or
+                value_or (dataset, "data_read", False)):
+            return self.error_403 (request)
+
         return self.__api_v3_item_references (request, dataset)
 
     def api_v3_collection_references (self, request, collection_id):
@@ -6754,6 +6883,10 @@ class ApiServer:
             item  = item_by_id_procedure (item_id,
                                           account_uuid=account_uuid,
                                           is_published=False)
+
+            if not (not value_or (item, "is_shared_with_me", False) or
+                    value_or (item, "data_read", False)):
+                return self.error_403 (request)
 
             tags = self.db.tags (
                 item_uri        = item["uri"],
@@ -6959,6 +7092,9 @@ class ApiServer:
                 dataset = self.db.datasets (git_uuid = git_uuid, is_published=False)[0]
 
             if dataset is not None:
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "data_edit", False)):
+                    return self.error_403 (request)
                 return self.__git_passthrough (request)
         except IndexError:
             pass
@@ -6975,6 +7111,10 @@ class ApiServer:
                                             is_latest    = None)[0]
 
             if dataset is not None:
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "data_read", False)):
+                    return self.error_403 (request)
+
                 self.__log_event (request, dataset["container_uuid"], "dataset", "gitDownload")
                 return self.__git_passthrough (request)
         except IndexError:
