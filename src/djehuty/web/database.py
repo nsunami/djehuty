@@ -1640,6 +1640,7 @@ class SparqlInterface:
             return True
 
         return False
+
     def collaborators (self, dataset_uuid):
         "Get list of collaborators of a dataset"
         query = self.__query_from_template("collaborators", {
@@ -1798,6 +1799,7 @@ class SparqlInterface:
     def delete_dataset_draft (self, container_uuid, dataset_uuid, account_uuid):
         """Remove the draft dataset from a container in the state graph."""
 
+        collaborators = self.collaborators(dataset_uuid)
         query   = self.__query_from_template ("delete_dataset_draft", {
             "account_uuid":        account_uuid,
             "container_uri":       rdf.uuid_to_uri (container_uuid, "container")
@@ -1806,7 +1808,6 @@ class SparqlInterface:
         if self.enable_query_audit_log:
             self.__log_query (query, "Query Audit Log")
 
-        collaborators = self.collaborators(dataset_uuid)
         result = self.__run_query (query)
         self.cache.invalidate_by_prefix (f"{account_uuid}_storage")
         self.cache.invalidate_by_prefix (f"{dataset_uuid}_dataset_storage")

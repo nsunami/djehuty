@@ -3,7 +3,7 @@
 DELETE {
   GRAPH <{{state_graph}}> {
     ?dataset  ?predicate            ?object .
-    ?list     djht:index             ?list_index .
+    ?list     djht:index            ?list_index .
     ?list     ?any                  ?list_item .
 
     ?container djht:draft           ?dataset .
@@ -12,7 +12,7 @@ DELETE {
 WHERE {
   GRAPH <{{state_graph}}> {
     ?container rdf:type             djht:DatasetContainer ;
-               djht:draft            ?dataset .
+               djht:draft           ?dataset .
 
     {
       ?container djht:account <account:{{account_uuid}}> .
@@ -23,11 +23,9 @@ WHERE {
     }
     ?dataset   ?predicate           ?object ;
                ?list_predicate      ?list .
-    OPTIONAL {
-      ?list      rdf:type             rdf:List ;
-                 djht:index            ?list_index ;
-                 rdf:rest*/rdf:first  ?list_item .
-    }
+    ?list      rdf:type             rdf:List ;
+               djht:index           ?list_index ;
+               rdf:rest*/rdf:first  ?list_item .
   }
 
   FILTER (?container = <{{container_uri}}>)
