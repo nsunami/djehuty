@@ -4606,7 +4606,7 @@ class ApiServer:
                     return self.error_403 (request)
 
                 if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "metadata_read", False)):
+                        value_or (dataset, "data_read", False)):
                     return self.error_403 (request)
 
                 files = self.db.dataset_files (
@@ -4636,7 +4636,7 @@ class ApiServer:
                     return self.error_403 (request)
 
                 if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "metadata_edit", False)):
+                        value_or (dataset, "data_edit", False)):
                     return self.error_403 (request)
 
                 if link is not None:
@@ -4696,7 +4696,7 @@ class ApiServer:
                     return self.error_404 (request)
 
                 if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "metadata_read", False)):
+                        value_or (dataset, "data_read", False)):
                     return self.error_403 (request)
 
                 metadata = self.__file_by_id_or_uri (file_id,
@@ -4722,7 +4722,7 @@ class ApiServer:
                     return self.error_403 (request)
 
                 if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "metadata_remove", False)):
+                        value_or (dataset, "data_remove", False)):
                     return self.error_403 (request)
 
                 self.locks.lock (locks.LockTypes.FILE_LIST)
