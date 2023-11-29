@@ -381,19 +381,31 @@ function render_collaborators_for_dataset (dataset_uuid) {
     });
 }
 
+function all_is_false(object) {
+    for (value of Object.values(object)) {
+        if (value) {return false}
+    }
+    return true;
+}
 function add_collaborator (dataset_uuid) {
     let form_data= {
-        "metadata": {
-            "read": jQuery("input[name='read'].subitem-checkbox-metadata").prop("checked"),
-            "edit": jQuery("input[name='edit'].subitem-checkbox-metadata").prop("checked"),
-            "remove": jQuery("input[name='remove'].subitem-checkbox-metadata").prop("checked"),
-        },
-        "data": {
-            "read": jQuery("input[name='read'].subitem-checkbox-data").prop("checked"),
-            "edit": jQuery("input[name='edit'].subitem-checkbox-data").prop("checked"),
-            "remove": jQuery("input[name='remove'].subitem-checkbox-data").prop("checked"),
-        },
-        "email": or_null(jQuery("#add_collaborator").val())
+            "metadata": {
+                "read": jQuery("input[name='read'].subitem-checkbox-metadata").prop("checked"),
+                "edit": jQuery("input[name='edit'].subitem-checkbox-metadata").prop("checked"),
+                "remove": jQuery("input[name='remove'].subitem-checkbox-metadata").prop("checked"),
+            },
+            "data": {
+                "read": jQuery("input[name='read'].subitem-checkbox-data").prop("checked"),
+                "edit": jQuery("input[name='edit'].subitem-checkbox-data").prop("checked"),
+                "remove": jQuery("input[name='remove'].subitem-checkbox-data").prop("checked"),
+            },
+            "email": or_null(jQuery("#add_collaborator").val())
+        }
+
+    if(all_is_false(form_data.metadata) && all_is_false(form_data.data)) {
+        show_message("failure",
+            "<p>Check at least one of the boxes to add a collaborator</p>");
+        return false;
     }
 
     jQuery.ajax({
