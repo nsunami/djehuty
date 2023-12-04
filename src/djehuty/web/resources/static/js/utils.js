@@ -56,6 +56,44 @@ function toggle_categories () {
     }
 }
 
+function fill_collaborator (email, full_name, account_uuid) {
+    jQuery("#add_collaborator").val(`${full_name}, (${email})`);
+    jQuery("#account_uuid").val(`${account_uuid}`);
+    jQuery("#collaborator-ac").remove();
+    jQuery("#add_collaborator").removeClass("input-for-ac");
+}
+
+function autocomplete_collaborator (event, item_id) {
+    let current_text = jQuery.trim(jQuery("#add_collaborator").val());
+    if (current_text == "") {
+        jQuery("#collaborator-ac").remove();
+        jQuery("#add_collaborator").removeClass("input-for-ac");
+    } else if (current_text.length > 2) {
+        jQuery.ajax({
+            url:     "/v3/accounts/search",
+            type:    "POST",
+            contentType: "application/json",
+            accept: "application/json",
+            data: JSON.stringify({ "search_for": current_text}),
+            }).done(function (data) {
+                jQuery("#collaborator-ac").remove();
+                let html = "<ul>";
+                for (let item of data) {
+                    html += `<li><a href="#" `;
+                    html += `onclick="javascript:fill_collaborator('${item["email"]}','${item["full_name"]}','${item["uuid"]}'`
+                    html += `); return false;">${item["full_name"]}, ${item["email"]}`;
+                    html += "</a>";
+                }
+                html += "</ul>";
+
+                jQuery("#add_collaborator")
+                    .addClass("input-for-ac")
+                    .after(`<div id="collaborator-ac" class="autocomplete">${html}</div>`);
+            }).fail(function (response, text_status, error_code) { console.log (`Error code: ${error_code} `);
+        });
+    }
+}
+
 function autocomplete_author (event, item_id) {
     let current_text = jQuery.trim(jQuery("#authors").val());
     if (current_text == "") {

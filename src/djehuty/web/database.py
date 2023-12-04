@@ -2787,8 +2787,16 @@ class SparqlInterface:
 
     def accounts (self, account_uuid=None, order=None, order_direction=None,
                   limit=None, offset=None, is_active=None, email=None,
-                  id_lte=None, id_gte=None, institution_user_id=None):
+                  id_lte=None, id_gte=None, institution_user_id=None, search_for=None):
         """Returns accounts."""
+
+        filters = None
+        if search_for is not None:
+            escaped = rdf.escape_string_value (search_for.lower())
+            filters = (f"FILTER (CONTAINS(LCASE(?email), {escaped}) ||\n"
+                        f"        CONTAINS(LCASE(?first_name),  {escaped}) ||\n"
+                        f"        CONTAINS(LCASE(?last_name),  {escaped}) ||\n"
+                        f"        CONTAINS(LCASE(?full_name),  {escaped}))")
 
         query = self.__query_from_template ("accounts", {
             "account_uuid": account_uuid,
@@ -2797,6 +2805,7 @@ class SparqlInterface:
             "institution_user_id": rdf.escape_string_value (institution_user_id),
             "minimum_account_id": id_gte,
             "maximum_account_id": id_lte,
+            "filters": filters
         })
         query += rdf.sparql_suffix (order, order_direction, limit, offset)
         return self.__run_query (query, query, "accounts")

@@ -322,6 +322,7 @@ class ApiServer:
             R("/v3/tags/search",                                                 self.api_v3_tags_search),
             R("/v3/datasets/<dataset_uuid>/collaborators",                       self.api_v3_dataset_collaborators),
             R("/v3/datasets/<dataset_uuid>/collaborators/<collaborator_uuid>",   self.api_v3_dataset_remove_collaborator),
+            R("/v3/accounts/search",                                             self.api_v3_dataset_search_collaborator),
 
 
             ## Data model exploratory
@@ -2107,13 +2108,6 @@ class ApiServer:
 
     def api_v3_dataset_collaborators(self, request, dataset_uuid):
         """Implements /v3/datasets/dataset_uuid/collaborator"""
-        # 1. Formulier maken <check>
-        # 1.b contributors worden collaborators <check>
-        # 2. Formulier stukje -add collaborator- knop info opvangen <check>
-        # 3. Die info opslaan in de database
-        # 4. Dan; hoe halen we die info weer op" (in aparte .sparql query)
-        # zodat je die tabel hebt met de bestaande collaborators
-        # 5. Daarna toepassen van de RWX / RBAC
 
         if not self.accepts_json (request):
             return self.error_406 ("application/json")
@@ -2142,26 +2136,35 @@ class ApiServer:
                     value_or (dataset, "metadata_read", False)):
                 return self.error_403 (request)
 
-            collaborators =  self.db.collaborators (dataset["uuid"])
+            collaborators = self.db.collaborators (dataset["uuid"])
             return self.default_list_response (collaborators, formatter.format_collaborator_record)
 
         if request.method == "POST":
             if value_or (dataset, "is_shared_with_me", False):
                 return self.error_403 (request)
 
-            parameters = request.get_json()
-            self.log.info("parameters:%s", parameters)
-            #later: dict validatie
-            metadata = parameters["metadata"]
-            data = parameters["data"]
-            email = validator.string_value(parameters, "email")
+            try:
+                parameters = request.get_json()
+                metadata = parameters["metadata"]
+                data = parameters["data"]
+                collaborator_account_uuid = validator.string_value(parameters, "account")
 
-            account = self.db.account_by_email(email)
+                if not validator.is_valid_uuid(collaborator_account_uuid):
+                    raise validator.InvalidValueType(
+                        field_name = "account",
+                        message = "Expected a valid UUID for 'account'",
+                        code = "WrongValueType"
+                    )
+
+            except validator.ValidationException as error:
+                return self.error_400(request, error.message, error.code)
+
+            account = self.db.account_by_uuid(collaborator_account_uuid)
             if account is None:
-                self.log.error("Requesting email failed. ")
+                self.log.error("Requesting collaborator account uuid failed. ")
 
             collaborators = self.db.insert_collaborator (dataset["uuid"],
-                                                         account["uuid"],
+                                                         collaborator_account_uuid,
                                                          account_uuid,
                                                          metadata["read"],
                                                          metadata["edit"],
@@ -2178,6 +2181,27 @@ class ApiServer:
             return self.respond_205()
 
         return self.error_500 ()
+
+    def api_v3_dataset_search_collaborator(self, request):
+        """Search and autocomplete to add collaborator"""
+        if not self.accepts_json(request):
+            return self.error_406("application/json")
+
+        account_uuid = self.account_uuid_from_request(request)
+        if account_uuid is None:
+            return self.error_authorization_failed(request)
+
+        if request.method != "POST":
+            return self.error_405 ("POST")
+
+        try:
+            parameters = request.get_json()
+            search_for = validator.string_value(parameters, "search_for", 0, 32, required=True)
+            existing_email = self.db.accounts(search_for=search_for)
+            return self.response(json.dumps(existing_email))
+
+        except (validator.ValidationException, KeyError):
+            return self.error_400(request, error.message, error.code)
 
     def api_v3_dataset_remove_collaborator(self, request, dataset_uuid, collaborator_uuid):
         """Removes the collaborator from the share section of edit dataset form."""

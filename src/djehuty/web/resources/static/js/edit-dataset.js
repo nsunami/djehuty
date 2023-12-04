@@ -338,7 +338,8 @@ function render_collaborators_for_dataset (dataset_uuid) {
     }).done(function (collaborators) { console.log("Werkt?")
         jQuery("#collaborators-form tbody").empty();
         let row ='<tr>';
-            row += '<td><input type="text" id="add_collaborator" name="add_collaborator" value=""/></td>';
+            row += '<td><input type="text" id="add_collaborator" name="add_collaborator" value=""/>';
+            row += '<input type="hidden" id="account_uuid" name="account_uuid" value=""/></td>';
             row += '<td><input class="subitem-checkbox-metadata" name="read" type="checkbox"></td>';
             row += '<td><input class="subitem-checkbox-metadata" name="edit" type="checkbox"></td>';
             row += '<td><input class="subitem-checkbox-metadata" name="remove" type="checkbox"></td>';
@@ -375,6 +376,9 @@ function render_collaborators_for_dataset (dataset_uuid) {
             row += `title="Remove"></a></td></tr>`;
             jQuery("#collaborators-form tbody").append(row);
         }
+        jQuery("#add_collaborator").on("input", function (event) {
+            return autocomplete_collaborator (event, dataset_uuid);
+        });
         jQuery("#collaborators-form").show();
     }).fail(function () {
         show_message ("failure", "<p>Failed to retrieve collaborators.</p>");
@@ -387,6 +391,7 @@ function all_is_false(object) {
     }
     return true;
 }
+
 function add_collaborator (dataset_uuid) {
     let form_data= {
             "metadata": {
@@ -399,7 +404,7 @@ function add_collaborator (dataset_uuid) {
                 "edit": jQuery("input[name='edit'].subitem-checkbox-data").prop("checked"),
                 "remove": jQuery("input[name='remove'].subitem-checkbox-data").prop("checked"),
             },
-            "email": or_null(jQuery("#add_collaborator").val())
+            "account": or_null(jQuery("#account_uuid").val())
         }
 
     if(all_is_false(form_data.metadata) && all_is_false(form_data.data)) {
