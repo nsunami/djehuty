@@ -68,25 +68,21 @@ function preview_dataset (dataset_uuid, event) {
     });
 }
 
-function toggle_share_form (dataset_uuid, event) {
-    event.preventDefault();
-    event.stopPropagation();
-    let share_div = jQuery("#share-form");
-    if (share_div.is(":visible")) {
-        jQuery("#share-form").slideUp(150, function (){
-            jQuery("#share").text("Share");
-        });
-    } else {
-        jQuery("#share-form").slideDown(150, function (){
-            jQuery("#share").text("Cancel share");
-            render_collaborators_for_dataset(dataset_uuid);
-        });
-    }
-}
-
-function gather_share_form_data (event) {
-
-}
+// function toggle_share_form (dataset_uuid, event) {
+//     event.preventDefault();
+//     event.stopPropagation();
+//     let share_div = jQuery("#share-form");
+//     if (share_div.is(":visible")) {
+//         jQuery("#share-form").slideUp(150, function (){
+//             jQuery("#share").text("Share");
+//         });
+//     } else {
+//         jQuery("#share-form").slideDown(150, function (){
+//             jQuery("#share").text("Cancel share");
+//             render_collaborators_for_dataset(dataset_uuid);
+//         });
+//     }
+// }
 
 function share_dataset (dataset_uuid, event) {
     event.preventDefault();
@@ -374,7 +370,7 @@ function render_collaborators_for_dataset (dataset_uuid) {
             row += `onclick="javascript:remove_collaborator('${encodeURIComponent(collaborator.uuid)}', `;
             row += `'${dataset_uuid}'); return false;" class="fas fa-trash-can" `;
             row += `title="Remove"></a></td></tr>`;
-            jQuery("#collaborators-form tbody").append(row);
+            jQuery("#collaborators-form tbody").prepend(row);
         }
         jQuery("#add_collaborator").on("input", function (event) {
             return autocomplete_collaborator (event, dataset_uuid);
@@ -1069,7 +1065,6 @@ function activate (dataset_uuid) {
         jQuery("#publish").on("click", function (event) { publish_dataset (dataset_uuid, event); });
         jQuery("#decline").on("click", function (event) { decline_dataset (dataset_uuid, event); });
         jQuery("#preview").on("click", function (event) { preview_dataset (dataset_uuid, event); });
-        jQuery("#share").on("click", function (event) { toggle_share_form (dataset_uuid, event); });
 
         jQuery("#refresh-git-files").on("click", function (event) {
             render_git_files_for_dataset (dataset_uuid, event);

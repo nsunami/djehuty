@@ -56,6 +56,20 @@ function toggle_categories () {
     }
 }
 
+function toggle_collaborators (dataset_uuid, event) {
+    let expanded_collaborators = jQuery("#expanded-collaborators");
+    if (expanded_collaborators.is(":visible")) {
+        jQuery("#expanded-collaborators").slideUp(250, function() {
+            jQuery("#expand-collaborators-button").text("Add collaborators");
+        });
+    } else {
+        jQuery("#expanded-collaborators").slideDown(250, function() {
+            jQuery("#expand-collaborators-button").text("Hide collaborators");
+            render_collaborators_for_dataset(dataset_uuid);
+        });
+    }
+}
+
 function fill_collaborator (email, full_name, account_uuid) {
     jQuery("#add_collaborator").val(`${full_name}, (${email})`);
     jQuery("#account_uuid").val(`${account_uuid}`);

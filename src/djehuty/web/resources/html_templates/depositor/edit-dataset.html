@@ -46,9 +46,12 @@ jQuery(document).ready(function (){
 .upload-container:hover { cursor: pointer; }
 .upload-container p { font-size: 1.2em; }
 .file-incomplete-warning { font-style: italic; color: red; }
-#collaborators-form input[type="text"] {max-width:200px}
+#collaborators-form input[type="text"] {max-width:280px}
+#collaborator-ac  {max-width:280px}
+.autocomplete {padding: 0em 0.7em 0em 0.7em}
 #file { display: none; }
 #expanded-categories { display: none; }
+#expanded-collaborators { display: none; }
 .files td { text-align: left; }
 #software_upload_field h4 {
     font-size: 1.25em;
@@ -160,49 +163,6 @@ jQuery(document).ready(function (){
 <div class="hide-for-javascript">
 <h2>Dataset details</h2>
 <p>Fields marked with <span class="required-field">&#8727;</span> are required.</p>
-<div id="share-form">
-<div id="collaborators-wrapper">
-<div id="collaborators-type-wrapper" class="options-wrapper">
-<input type="radio" name="collaborators" id="collaborators" checked="checked"/><!--
---><label for="collaborators" class="no-head">Collaborators</label><!--
---><input type="radio" name="supervisor" id="supervisor"  /><!--
---><label for="supervisor" class="no-head">Supervisor</label>
-    <table id="collaborators-form" class="corporate-identity-table">
-      <thead>
-        <tr>
-          <th colspan="1" scope="colgroup">Collaborator</th>
-          <th colspan="3" scope="colgroup">Metadata</th>
-          <th colspan="3" scope="colgroup">Dataset</th>
-          <th colspan="1" scope="colgroup">Add/Remove</th>
-        </tr>
-        <tr>
-          <th scope="col"></th>
-          <th scope="col">Read </th>
-          <th scope="col">Edit</th>
-          <th scope="col">Delete</th>
-          <th scope="col">Read</th>
-          <th scope="col">Edit</th>
-          <th scope="col">Delete</th>
-          <th scope="col"></th>
-        </tr>
-      </thead>
-      <tbody>
-      </tbody>
-    </table>
-</div>
-<div class="supervisor" id="read_supervisor_form">
-  <table class="inside-form-table" id="collaborators-list">
-  <thead>
-  </thead>
-  <tbody>
-  </tbody>
-</table>
-  <p>
-    The head of your research group has access rights by default.
-  </p>
-</div>
-</div>
-</div>
 <label for="title">Title</label><div class="fas fa-question-circle help-icon"><span class="help-text">Give your research a title that is more descriptive than just a file name. This will help making your items discoverable via search engines such as Google. The title should have at least three characters.</span></div><span class="required-field">&#8727;</span>
 <input type="text" id="title" name="title" value="{{article['title']}}" />
 <label for="authors">Authors</label><div class="fas fa-question-circle help-icon"><span class="help-text">Select authors from the list or manually add them by creating a new author record. Hit enter after adding each author and drag and drop names to arrange them in the order you wish.</span></div><span class="required-field">&#8727;</span>
@@ -213,6 +173,40 @@ jQuery(document).ready(function (){
   </thead>
   <tbody></tbody>
 </table>
+
+<label>Collaborators</label><div class="fas fa-question-circle help-icon"><span class="help-text">Add people who are going to collaborate with you on this dataset.</span></div><span class="required-field">&#8727;</span>
+<div id="collaborator-wrapper" class="options-wrapper">
+  <a id="expand-collaborators-button" href="#" onclick="javascript:toggle_collaborators('{{container_uuid}}'); return false;">Add collaborators</a>
+  <div class="expand-collaborators">
+  </div>
+  <div id="expanded-collaborators">
+    <div id="collaborators-wrapper">
+      <input type="radio" name="collaborators" id="collaborators" checked="checked"/>
+      <table id="collaborators-form" class="corporate-identity-table">
+        <thead>
+          <tr>
+            <th colspan="1" scope="colgroup">Collaborator</th>
+            <th colspan="3" scope="colgroup">Metadata</th>
+            <th colspan="3" scope="colgroup">Dataset</th>
+            <th colspan="1" scope="colgroup">Add/Remove</th>
+          </tr>
+          <tr>
+            <th scope="col"></th>
+            <th scope="col">Read </th>
+            <th scope="col">Edit</th>
+            <th scope="col">Delete</th>
+            <th scope="col">Read</th>
+            <th scope="col">Edit</th>
+            <th scope="col">Delete</th>
+            <th scope="col"></th>
+          </tr>
+        </thead>
+        <tbody>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 
 <label>Description</label><div class="fas fa-question-circle help-icon"><span class="help-text">Add as much context as possible so that others can interpret your research and reproduce it. Make sure you include methodology, techniques used, and if relevant information about approval for data collection to confirm adherence to legal or ethical requirements. The description should have at least four characters.</span></div><span class="required-field">&#8727;</span>
 <div id="description" class="texteditor">
