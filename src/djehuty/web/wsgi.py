@@ -21,6 +21,7 @@ from werkzeug.wrappers import Request, Response
 from werkzeug.routing import Map, Rule
 from werkzeug.middleware.shared_data import SharedDataMiddleware
 from werkzeug.exceptions import HTTPException, NotFound, BadRequest
+from werkzeug.formparser import parse_form_data
 from rdflib import URIRef
 from jinja2 import Environment, FileSystemLoader
 from jinja2.exceptions import TemplateNotFound
@@ -98,6 +99,8 @@ class ApiServer:
         self.datacite_id         = None
         self.datacite_password   = None
         self.datacite_prefix     = None
+        self.webdav              = None
+        self.webdav_url_mapping  = None
         self.log_access          = self.log_access_directly
         self.log                 = logging.getLogger(__name__)
         self.locks               = locks.Locks()
@@ -385,7 +388,13 @@ class ApiServer:
         return False
 
     def __call__ (self, environ, start_response):
-        return self.wsgi (environ, start_response)
+        if self.webdav is not None and environ["REQUEST_URI"].startswith(self.webdav_url_mapping):
+            environ["wsgi.input"] = parse_form_data(environ)[0]
+
+            # TODO: Before return the webdav instance, check authorization
+            return self.webdav.__call__ (environ, start_response)
+        else:
+            return self.wsgi (environ, start_response)
 
     def __impersonator_token (self, request):
         return self.token_from_cookie (request, self.impersonator_cookie_key)

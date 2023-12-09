@@ -5,6 +5,9 @@ import sys
 import os
 import shutil
 import json
+import copy
+from wsgidav.wsgidav_app import WsgiDAVApp, FilesystemProvider
+from wsgidav.default_conf import DEFAULT_CONFIG
 from defusedxml import ElementTree
 from werkzeug.serving import run_simple
 from rdflib.plugins.stores import berkeleydb
@@ -283,6 +286,41 @@ def read_saml_configuration (server, xml_root, logger):
     del saml_sp_private_key
     return None
 
+def setup_webdav_configuration (server, config, logger):
+    """Set up the WebDAV configuration."""
+    webdav_config = copy.deepcopy(DEFAULT_CONFIG)
+
+    webdav_config["provider_mapping"][config["webdav_url_mapping"]] = FilesystemProvider(
+        config["webdav_storage_root"],
+        fs_opts=webdav_config.get("fs_dav_provider"),
+    )
+
+    # https://wsgidav.readthedocs.io/en/latest/user_guide_lib.html
+    webdav_config["host"] = config["address"]
+    webdav_config["port"] = config["port"]
+    webdav_config["lock_storage"] = True
+    webdav_config["http_authenticator"]["domain_controller"] ="wsgidav.dc.simple_dc.SimpleDomainController"
+    webdav_config["http_authenticator"]["accept_basic"] = True
+    webdav_config["http_authenticator"]["accept_digest"] = True
+    webdav_config["http_authenticator"]["default_to_digest"] = True
+
+    webdav_config["simple_dc"]["user_mapping"] = {"*": True}
+    webdav_config["dir_browser"]["icon"] = False
+
+    try:
+        if "webdav_log_file" in config and config["webdav_log_file"] is not None:
+            webdav_config["logging"]["enable"] = False
+            webdav_config["logging"]["logger_date_format"] = "%Y-%m-%d %H:%M:%S"
+            webdav_config["logging"]["logger_format"] = "[%(levelname)s] %(asctime)s - %(name)s: %(message)s"
+            configure_file_logging (config["webdav_log_file"], config["use_reloader"], logger, "wsgidav")
+
+        server.webdav = WsgiDAVApp(webdav_config)
+        server.webdav_url_mapping = config["webdav_url_mapping"]
+
+    except Exception as error:
+        logger.error ("Failed to set up WebDAV: %s", error)
+        logger.error ("WebDAV will not be enabled.")
+
 def setup_saml_service_provider (server, logger):
     """Write the SAML configuration file to disk and set up its metadata."""
     ## python3-saml wants to read its configuration from a file,
@@ -358,7 +396,7 @@ def read_privilege_configuration (server, xml_root, logger):
 
     return None
 
-def configure_file_logging (log_file, inside_reload, logger):
+def configure_file_logging (log_file, inside_reload, logger, logger_name=None):
     """Procedure to set up logging to a file."""
     is_writeable = False
     log_file     = os.path.abspath (log_file)
@@ -376,10 +414,13 @@ def configure_file_logging (log_file, inside_reload, logger):
         if not inside_reload:
             logger.info ("Writing further messages to '%s'.", log_file)
 
-        formatter    = logging.Formatter('[%(levelname)s] %(asctime)s - %(name)s: %(message)s')
+        formatter = logging.Formatter('[%(levelname)s] %(asctime)s - %(name)s: %(message)s')
         file_handler.setFormatter(formatter)
         file_handler.setLevel(logging.INFO)
-        log          = logging.getLogger()
+        if logger_name is None:
+            log = logging.getLogger()
+        else:
+            log = logging.getLogger(logger_name)
         for handler in log.handlers[:]:
             log.removeHandler(handler)
         log.addHandler(file_handler)
@@ -561,6 +602,23 @@ def read_configuration_file (server, config_file, address, port, state_graph,
                 server.disable_2fa = bool(int(disable_2fa))
             except (ValueError, TypeError):
                 logger.info("Invalid value for disable-2fa. Ignoring.. assuming 1 (True)")
+
+        webdav = xml_root.find ("webdav")
+        if webdav is not None:
+            is_enable =  bool(int(config_value (webdav, "enable"))),
+            if is_enable:
+                webdav_storage_root = config_value (webdav, "storage-root")
+                webdav_url_mapping  = config_value (webdav, "url-mapping")
+                if webdav_storage_root and webdav_url_mapping:
+                    config["webdav"]              = True
+                    config["webdav_storage_root"] = webdav_storage_root
+                    config["webdav_url_mapping"]  = webdav_url_mapping
+                else:
+                    logger.error ("Both 'storage-root' and 'url-mapping' nodes in 'webdav' must be set to enable WebDAV.")
+
+                webdav_log_file     = config_value (webdav, "log-file")
+                if webdav_log_file:
+                    config["webdav_log_file"] = webdav_log_file
 
         enable_query_audit_log = xml_root.find ("enable-query-audit-log")
         if enable_query_audit_log is not None:
@@ -881,6 +939,9 @@ def main (address=None, port=None, state_graph=None, storage=None,
             logger.info ("Clearing cache.")
             server.db.cache.invalidate_all ()
 
+        if ("webdav" in config and config["webdav"] is True):
+            setup_webdav_configuration (server, config, logger)
+
         setup_saml_service_provider (server, logger)
 
         if not server.in_production and not inside_reload:
@@ -929,6 +990,8 @@ def main (address=None, port=None, state_graph=None, storage=None,
             logger.info ("Storage path: %s.", server.db.storage)
             logger.info ("Secondary storage path: %s.", server.db.secondary_storage)
             logger.info ("Cache storage path: %s.", server.db.cache.storage)
+            logger.info ("WebDAV storage path: %s.", config.get("webdav_storage_root"))
+            logger.info ("WebDAV URL mapping: %s.", config.get("webdav_url_mapping"))
             logger.info ("Running on %s", server.base_url)
 
             if server.identity_provider is not None:

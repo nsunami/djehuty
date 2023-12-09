@@ -27,6 +27,12 @@
   <base-url>http://localhost:8080</base-url>
   <storage-root>/data</storage-root>
   <cache-root clear-on-start="1">/data/cache</cache-root>
+  <webdav>
+    <enable>0</enable>
+    <storage-root>/data/webdav</storage-root>
+    <url-mapping>/webdav</url-mapping>
+    <!-- <log-file>/var/log/djehuty-webdav.log</log-file> -->
+  </webdav>
   <live-reload>1</live-reload>
   <!-- <log-file>/var/log/djehuty.log</log-file> -->
   <debug-mode>1</debug-mode>
