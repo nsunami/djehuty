@@ -584,6 +584,7 @@ function render_files_for_dataset (dataset_uuid, fileUploader) {
             jQuery("input[name='record_type']").attr('disabled', true);
             jQuery("#upload_software").attr('disabled', false);
             jQuery("#upload_files").attr('disabled', false);
+            jQuery("#use_webdav").attr('disabled', false);
 
             let number_of_files = 0;
             for (let index in files) {
@@ -804,6 +805,11 @@ function toggle_record_type () {
         jQuery("#software_upload_field").show();
         jQuery("#file_upload_field").show();
         jQuery("#files-wrapper").show();
+        jQuery("#webdav_upload_field").show();
+    } else if (jQuery("#use_webdav").prop("checked")) {
+        jQuery(".record-type-field").hide();
+        jQuery("#webdav_upload_field").show();
+        jQuery("#files-wrapper").show();
     } else {
         jQuery("#upload_files").prop("checked", true);
     }
@@ -1023,6 +1029,8 @@ function activate (dataset_uuid) {
             jQuery("#upload_software").prop("checked", true);
             render_git_files_for_dataset (dataset_uuid, null);
             render_git_branches_for_dataset (dataset_uuid, null);
+        } else if (data["defined_type_name"] == "webdav") {
+            jQuery("#use_webdav").prop("checked", true);
         } else {
             jQuery("#upload_files").prop("checked", true);
         }

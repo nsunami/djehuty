@@ -17,6 +17,8 @@ WHERE {
   FILTER (?session = <session:{{session_uuid}}>)
   {%- endif %}{% if mfa_token is not none: %}
   FILTER (?mfa_token = {{mfa_token}})
+  {%- endif %}{% if name is not none: %}
+  FILTER (STR(?name) = STR("{{name | safe}}"))
   {%- endif %}
 
   BIND (STRAFTER(STR(?session), "session:") AS ?uuid)

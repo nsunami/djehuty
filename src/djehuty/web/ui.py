@@ -304,7 +304,7 @@ def setup_webdav_configuration (server, config, logger):
     webdav_config["http_authenticator"]["accept_digest"] = True
     webdav_config["http_authenticator"]["default_to_digest"] = True
 
-    webdav_config["simple_dc"]["user_mapping"] = {"*": True}
+    webdav_config["simple_dc"]["user_mapping"] = {}
     webdav_config["dir_browser"]["icon"] = False
 
     try:
@@ -316,6 +316,7 @@ def setup_webdav_configuration (server, config, logger):
 
         server.webdav = WsgiDAVApp(webdav_config)
         server.webdav_url_mapping = config["webdav_url_mapping"]
+        server.webdav_storage_root = config["webdav_storage_root"]
 
     except Exception as error:
         logger.error ("Failed to set up WebDAV: %s", error)

@@ -58,6 +58,11 @@ jQuery(document).ready(function (){
     margin: .75em 0em .25em 0em;
     font-weight: bold;
 }
+#webdav_upload_field h4 {
+    font-size: 1.25em;
+    margin: .75em 0em .25em 0em;
+    font-weight: bold;
+}
 #access-wrapper #access-type-wrapper {
     border: none;
     border-bottom: solid 2pt #333;
@@ -380,7 +385,9 @@ jQuery(document).ready(function (){
 --><input type="radio" name="record_type" id="upload_files" value="files" /><!--
 --><label for="upload_files" class="no-head">File deposit</label><!--
 --><input type="radio" name="record_type" id="upload_software" value="software" /><!--
---><label for="upload_software" class="no-head">Software deposit</label>
+--><label for="upload_software" class="no-head">Software deposit</label><!--
+--><input type="radio" name="record_type" id="use_webdav" value="webdavfiles" /><!--
+--><label for="use_webdav" class="no-head">WebDAV</label>
 </div>
 <div id="metadata_reason_field" class="record-type-field">
   <p>Only use this option when there are no files to attach.  Enter the reason
@@ -422,6 +429,19 @@ git push 4tu --tags</pre>
     produced by a build system. If applicable, upload them as files below.
   </p>
 </div>
+<div id="webdav_upload_field" class="record-type-field">
+  <h4 class="corporate-identity-h4">Use WebDAV</h4>
+  <p>You can use WebDAV to access the storage directly using your File Manager. (i.e., Microsoft's File Explorer, Apple's Finder)</p>
+  <p>You first need to enable the WebDAV option for this dataset if you have never used it in the past. Click the link below to enable it.</p>
+  <p>Enable: <a href="{{base_url}}/webdav/datasets/{{container_uuid}}?enable=1">{{base_url}}/webdav/datasets/{{container_uuid}}?enable=1</a></p>
+  <p>Once enabled, you can access the storage using the following URL:</p>
+  <p><a href="{{base_url}}/webdav/datasets/{{container_uuid}}">{{base_url}}/webdav/datasets/{{container_uuid}}</a></p>
+  <p>Please keep in mind that you need ID and PASSWORD to access the storage via WebDAV.</p>
+  <pre>Your ID is your <font color=red><b>EMAIL ADDRESS</b></font>
+Your PASSWORD is <font color=red>your API KEY which is saved as the name <b>"webdav"</b></font>.</pre>
+  <p>If there are more than 2 API keys with the name "webdav", then the API key that created for the last time will be chosen as the password.</p>
+</div>
+
 <div id="file_upload_field" class="upload-wrapper record-type-field">
 <form id="dropzone-field" class="upload-container dropzone" action="/v3/datasets/{{container_uuid}}/upload" method="post">
   <div class="fallback">

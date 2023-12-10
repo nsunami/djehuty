@@ -1647,7 +1647,7 @@ class SparqlInterface:
             "dataset_uuid": dataset_uuid,
         })
 
-        self.__log_query(query)
+        # self.__log_query(query)
 
         return self.__run_query(query)
 
@@ -2985,13 +2985,14 @@ class SparqlInterface:
 
         return self.__run_query(query)
 
-    def sessions (self, account_uuid, session_uuid=None, mfa_token=None):
+    def sessions (self, account_uuid, session_uuid=None, mfa_token=None, name=None):
         """Returns the sessions for an account."""
 
         query = self.__query_from_template ("account_sessions", {
             "account_uuid":  account_uuid,
             "session_uuid":  session_uuid,
-            "mfa_token":     mfa_token
+            "mfa_token":     mfa_token,
+            "name":          name
         })
 
         return self.__run_query (query)

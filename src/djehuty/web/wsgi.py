@@ -22,6 +22,7 @@ from werkzeug.routing import Map, Rule
 from werkzeug.middleware.shared_data import SharedDataMiddleware
 from werkzeug.exceptions import HTTPException, NotFound, BadRequest
 from werkzeug.formparser import parse_form_data
+from wsgidav.wsgidav_app import FilesystemProvider
 from rdflib import URIRef
 from jinja2 import Environment, FileSystemLoader
 from jinja2.exceptions import TemplateNotFound
@@ -101,6 +102,7 @@ class ApiServer:
         self.datacite_prefix     = None
         self.webdav              = None
         self.webdav_url_mapping  = None
+        self.webdav_storage_root = None
         self.log_access          = self.log_access_directly
         self.log                 = logging.getLogger(__name__)
         self.locks               = locks.Locks()
@@ -390,9 +392,11 @@ class ApiServer:
     def __call__ (self, environ, start_response):
         if self.webdav is not None and environ["REQUEST_URI"].startswith(self.webdav_url_mapping):
             environ["wsgi.input"] = parse_form_data(environ)[0]
-
-            # TODO: Before return the webdav instance, check authorization
-            return self.webdav.__call__ (environ, start_response)
+            webdav_response = self.ui_webdav(environ)
+            if webdav_response is not None:
+                return webdav_response(environ, start_response)
+            else:
+                return self.webdav.__call__ (environ, start_response)
         else:
             return self.wsgi (environ, start_response)
 
@@ -7622,6 +7626,106 @@ class ApiServer:
         return self.__render_export_format(template_name="citation.cff",
                                            mimetype="text/plain",
                                            headers=headers, **parameters)
+
+    def ui_webdav (self, environ):
+        """Inspect a WebDAV request whether registration is needed."""
+
+        request = environ["werkzeug.request"]
+
+        # Check if this request is to enable WebDAV for a dataset.
+        # Otherwise, return None to let the request pass through.
+        query_string = environ.get('QUERY_STRING', '')
+        query_string = query_string.rstrip('&')
+        query_string = query_string.rstrip('/')
+
+        if query_string != "enable=1":
+            return None
+
+        # Validate the URL path if it is /webdav/datasets/<container_id>.
+        webdav_url_path = environ.get('PATH_INFO', '')
+        if not webdav_url_path.startswith('/webdav/datasets/'):
+            return self.error_404 (request)
+        # check if the last part of the path is a valid uuid.
+        url_path_split = webdav_url_path.split('/')
+        if len(url_path_split) != 4:
+            return self.error_404 (request)
+
+        container_id = url_path_split[3]
+        if not validator.is_valid_uuid (container_id):
+            self.log.warning ("Invalid dataset UUID: %s", container_id)
+            return self.error_404 (request)
+
+        # Is the container_id valid?
+        try:
+            dataset = self.__dataset_by_id_or_uri (container_id,
+                                                   is_published = False,
+                                                   use_cache    = False)
+
+            if dataset is None:
+                return self.error_403 (request)
+
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_edit", False)):
+                return self.error_403 (request)
+
+            account = self.db.account_by_uuid (dataset["account_uuid"])
+
+        except Exception:
+            return self.error_403 (request)
+
+        user_mapping = dict()
+
+        # Get the API token of the account of the dataset.
+        # The WebDAV password is set by the token stored as "webdav".
+        account_email = account["email"].lower()
+        token = self.db.sessions (account["uuid"], name="webdav")
+
+        # If there are more than 2 tokens having the same name "webdav",
+        # the latest one is used.
+        if token and len(token) > 0:
+            token = token[0]["token"]
+
+        user_mapping[account_email] = { "password": token }
+
+        collaborators = self.db.collaborators (dataset["uuid"])
+        if collaborators is not None:
+            for collaborator in collaborators:
+                collaborator_email = collaborator["email"].lower()
+                collaborator_token = self.db.sessions (collaborator["account_uuid"], name="webdav")
+                if collaborator_token and len(collaborator_token) > 0:
+                    collaborator_token = collaborator_token[0]["token"]
+                user_mapping[collaborator_email] = { "password": collaborator_token }
+
+        # self.log.debug ("New WebDAV user mapping: %s", user_mapping)
+
+        # Update the webdav config to add the user mapping to the dataset.
+        self.webdav.config["simple_dc"]["user_mapping"][webdav_url_path] = user_mapping
+
+        # If the webdav_url is already registered in the provider list, return None
+        dataset_storage_path = f"{self.webdav_storage_root}/datasets/{container_id}"
+        current_provider = self.webdav.config["provider_mapping"]
+
+        # self.log.debug ("Current provider mapping: %s", current_provider)
+
+        if webdav_url_path in current_provider:
+            # response = self.response ("WebDAV is already enabled for this dataset.", mimetype="text/plain")
+            # response = self.response (json.dumps({"message": "WebDAV is already enabled for this dataset."}), mimetype="application/json")
+            # response.status_code = 200
+            # return response
+            return self.respond_201({"message": "As WebDAV is already enabled for this dataset, only the user mapping has been updated."})
+
+        if not os.path.exists (dataset_storage_path):
+            try:
+                os.mkdir (dataset_storage_path)
+            except OSError as e:
+                self.log.error ("Could not create %s: %s", dataset_storage_path, e)
+                return self.error_500 ()
+
+        self.log.info ("Registering %s as a WebDAV provider.", webdav_url_path)
+        self.webdav.config["provider_mapping"][webdav_url_path] = FilesystemProvider(dataset_storage_path, fs_opts=self.webdav.config.get("fs_dav_provider"))
+        self.webdav.add_provider(webdav_url_path, FilesystemProvider(dataset_storage_path, fs_opts=self.webdav.config.get("fs_dav_provider")))
+
+        return self.respond_201({"message": f"WebDAV has been enabled for the dataset {container_id}."})
 
     def parse_organizations (self, text):
         """Obscure procedure to split organizations by semicolon."""
