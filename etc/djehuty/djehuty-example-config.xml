@@ -30,7 +30,7 @@
   <webdav>
     <enable>0</enable>
     <storage-root>/data/webdav</storage-root>
-    <url-mapping>/webdav</url-mapping>
+    <url-mapping>/webdav/datasets</url-mapping>
     <!-- <log-file>/var/log/djehuty-webdav.log</log-file> -->
   </webdav>
   <live-reload>1</live-reload>

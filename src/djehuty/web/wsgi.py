@@ -7643,14 +7643,11 @@ class ApiServer:
 
         # Validate the URL path if it is /webdav/datasets/<container_id>.
         webdav_url_path = environ.get('PATH_INFO', '')
-        if not webdav_url_path.startswith('/webdav/datasets/'):
+        if not webdav_url_path.startswith(self.webdav_url_mapping):
             return self.error_404 (request)
         # check if the last part of the path is a valid uuid.
         url_path_split = webdav_url_path.split('/')
-        if len(url_path_split) != 4:
-            return self.error_404 (request)
-
-        container_id = url_path_split[3]
+        container_id = url_path_split[-1]
         if not validator.is_valid_uuid (container_id):
             self.log.warning ("Invalid dataset UUID: %s", container_id)
             return self.error_404 (request)

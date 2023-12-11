@@ -290,10 +290,11 @@ def setup_webdav_configuration (server, config, logger):
     """Set up the WebDAV configuration."""
     webdav_config = copy.deepcopy(DEFAULT_CONFIG)
 
-    webdav_config["provider_mapping"][config["webdav_url_mapping"]] = FilesystemProvider(
-        config["webdav_storage_root"],
-        fs_opts=webdav_config.get("fs_dav_provider"),
-    )
+    # As config["webdav_url_mapping"] is dinamically set, this might not need.
+    # webdav_config["provider_mapping"][config["webdav_url_mapping"]] = FilesystemProvider(
+    #     config["webdav_storage_root"],
+    #     fs_opts=webdav_config.get("fs_dav_provider"),
+    # )
 
     # https://wsgidav.readthedocs.io/en/latest/user_guide_lib.html
     webdav_config["host"] = config["address"]
