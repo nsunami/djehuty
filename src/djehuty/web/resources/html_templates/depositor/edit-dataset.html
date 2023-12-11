@@ -437,9 +437,13 @@ git push 4tu --tags</pre>
   <p>Once enabled, you can access the storage using the following URL:</p>
   <p><a href="{{base_url}}/webdav/datasets/{{container_uuid}}">{{base_url}}/webdav/datasets/{{container_uuid}}</a></p>
   <p>Please keep in mind that you need ID and PASSWORD to access the storage via WebDAV.</p>
-  <pre>Your ID is your <font color=red><b>EMAIL ADDRESS</b></font>
-Your PASSWORD is <font color=red>your API KEY which is saved as the name <b>"webdav"</b></font>.</pre>
-  <p>If there are more than 2 API keys with the name "webdav", then the API key that created for the last time will be chosen as the password.</p>
+  <p>ID: <font color=red><b>{{account["email"]}}</b></font><br>
+     PW: <font color=red><b>{{webdav_key}}</b></font></p>
+  <p>Please note that the password above is the same as the API key named "webdav". If the "webdav" API key doesn't exist, this page will generate it automatically. If the password is "None" above, please reload this page after clearing your web-browser's cache. If you want, you can regenerate the password through removing the current API key and recreating a new API key on the main DASHBOARD -> CREATE API TOKEN.</p>
+  <p><font color=red><b><u>IMPORTANT</u></b></font><br>
+  1. In case you regenerate the API key to change the password, do not forget setting the API key name as "webdav".<br>
+  2. If the password is changed, <i><u>CLICK THE "enable" LINK AGAIN!</u></i> Otherwise, the new password will not work.
+  </p>
 </div>
 
 <div id="file_upload_field" class="upload-wrapper record-type-field">

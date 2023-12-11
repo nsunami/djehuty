@@ -1723,6 +1723,7 @@ class ApiServer:
             categories = self.db.categories_tree ()
             account    = self.db.account_by_uuid (account_uuid)
             groups     = self.__groups_for_account (account)
+            webdav_key = self.__get_webdav_api_key(account)
 
             try:
                 # Historically, some datasets have multiple values for
@@ -1741,7 +1742,8 @@ class ApiServer:
                 article    = dataset,
                 account    = account,
                 categories = categories,
-                groups     = groups)
+                groups     = groups,
+                webdav_key = webdav_key)
 
         except IndexError:
             return self.error_403 (request)
@@ -2059,6 +2061,16 @@ class ApiServer:
             return redirect (f"/my/sessions/{session_uuid}/edit", code=302)
 
         return self.error_500()
+
+    def __get_webdav_api_key (self, account):
+        token = self.db.sessions (account["uuid"], name="webdav")
+        if token:
+            return token[0]["token"]
+        else:
+            _, token, _ = self.db.insert_session (account["uuid"],
+                                                  name="webdav",
+                                                  override_mfa=True)
+            return token
 
     def __remove_session_due_to_2fa_mismatch (self, session_uuid):
         """Procedure to log and delete session upon 2FA mismatch."""
