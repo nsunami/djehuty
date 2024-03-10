@@ -2470,6 +2470,7 @@ class SparqlInterface:
 
         return self.__run_query (query, query, "group")
 
+
     def group_by_name (self, group_name, startswith=False):
         """Procedure to return group information by its name."""
 
@@ -2533,6 +2534,47 @@ class SparqlInterface:
 
         results = self.__run_query (query)
         return results
+
+    def log_entry_search (self, container_id=None, event_type=None, start_date=None, end_date=None):
+        """Procedure to return log entries."""
+
+        filters = ""
+        filters += rdf.sparql_filter ("container_id", rdf.uuid_to_uri (container_id, "container"), is_uri=True)
+        # FILTER (?event_type = djht:LogEntryView)
+        filters += rdf.sparql_filter("event_type", event_type)
+         
+        if start_date and end_date:
+            filters += f'FILTER (?created >  "{start_date}"^^xsd:dateTime AND ?created <  "{end_date}"^^xsd:dateTime)'   
+
+            
+        # FILTER ( ?container = <container:e478a84c-ce5e-4a1e-857e-b896d6581eb4>)
+        # filters += rdf.sparql_filter ("id", group_id)
+        # filters += rdf.sparql_filter ("parent_id", parent_id)
+        # filters += rdf.sparql_filter("container", "e478a84c-ce5e-4a1e-857e-b896d6581eb4")
+        # filters += rdf.sparql_filter("event_type", "djht:LogEntryView")
+        # if name is not None:
+            # if starts_with:
+                # escaped_name = rdf.escape_string_value (name)
+        # filters += f"FILTER (STRSTARTS(STR(?name), {escaped_name}))"
+                # FILTER ( ?container = <container:e478a84c-ce5e-4a1e-857e-b896d6581eb4>) 
+        # filters += f"FILTER (?container = <container:e478a84c-ce5e-4a1e-857e-b896d6581eb4>)"
+               
+        # filters += f"FILTER (?created > \"2023-10-18T00:00:00\"^^xsd:dateTime AND ?created < \"2023-10-23T00:00:00\"^^xsd:dateTime)"
+                # FILTER (?event_type = djht:LogEntryView)
+        # filters += f"FILTER (?event_type = djht:LogEntryView))"
+
+            # else:
+                # filters += rdf.sparql_filter ("name", name, escape=True)
+        # self.log.info()
+
+        # filters += rdf.sparql_filter ("association", association, escape=True)
+
+        query = self.__query_from_template ("log_entry_search", {
+            "filters":     filters
+        })
+
+        self.log.info(query)
+        return self.__run_query (query, query, "log_entry_search")
 
     ## ------------------------------------------------------------------------
     ## REVIEWS

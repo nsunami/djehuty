@@ -74,6 +74,7 @@ class ApiServer:
         self.sandbox_message  = False
         self.notice_message   = False
         self.show_portal_summary = True
+        self.show_graphs = True
         self.show_institutions = True
         self.show_science_categories = True
         self.show_latest_datasets = True
@@ -320,6 +321,7 @@ class ApiServer:
             R("/v3/datasets/<dataset_id>/tags",                                  self.api_v3_dataset_tags),
             R("/v3/collections/<collection_id>/tags",                            self.api_v3_collection_tags),
             R("/v3/groups",                                                      self.api_v3_groups),
+            R("/v3/log-entry/search/<container_id>",                             self.api_v3_log_entry_search),
             R("/v3/profile",                                                     self.api_v3_profile),
             R("/v3/profile/categories",                                          self.api_v3_profile_categories),
             R("/v3/profile/quota-request",                                       self.api_v3_profile_quota_request),
@@ -2732,6 +2734,7 @@ class ApiServer:
                                        latest = latest,
                                        notice_message = self.notice_message,
                                        show_portal_summary = self.show_portal_summary,
+                                       show_graphs = self.show_graphs,
                                        show_institutions = self.show_institutions,
                                        show_science_categories = self.show_science_categories,
                                        show_latest_datasets = self.show_latest_datasets)
@@ -6954,6 +6957,45 @@ class ApiServer:
                 order_direction = validator.order_direction (request.args, "order_direction"))
 
             return self.default_list_response (records, formatter.format_group_record)
+
+        except validator.ValidationException as error:
+            return self.error_400 (request, error.message, error.code)
+        
+    def api_v3_log_entry_search (self, request, container_id):
+        """Implements /v3/log_entry_search."""
+        handler = self.default_error_handling (request, "GET", "application/json")
+        if handler is not None:
+            return handler
+        
+    
+        event_mapping = {
+            "1": "djht:LogEntryView",
+            "2": "djht:LogEntryDownload"
+        }
+        event_type = validator.string_value(request.args, "event_type")
+
+        if not event_type:
+            event_type = event_mapping["1"]  
+        else:
+            event_type = event_mapping[event_type]              
+
+        try:
+            records = self.db.log_entry_search (
+                container_id    =  container_id,
+                event_type      =  event_type,
+                start_date      =  validator.string_value(request.args, "start_date"),
+                end_date        =  validator.string_value(request.args, "end_date")
+                # group_id        = validator.integer_value (request.args, "id"),
+                # parent_id       = validator.integer_value (request.args, "parent_id"),
+                # name            = validator.string_value  (request.args, "name", 0, 255),
+                # association     = validator.string_value  (request.args, "association", 0, 255),
+                # limit           = validator.integer_value (request.args, "limit"),
+                # offset          = validator.integer_value (request.args, "offset"),
+                # order           = validator.integer_value (request.args, "order"),
+                # order_direction = validator.order_direction (request.args, "order_direction")
+                )
+
+            return self.default_list_response (records, formatter.format_log_entry_record)
 
         except validator.ValidationException as error:
             return self.error_400 (request, error.message, error.code)

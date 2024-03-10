@@ -449,3 +449,9 @@ def format_group_record (record):
       "name":          conv.value_or_none(record, "name"),
       "association":   conv.value_or_none(record, "association"),
     }
+
+def format_log_entry_record (record):
+    """Record formatter for log_entry."""
+    return {
+      "created":          conv.value_or_none(record, "created"),
+    }

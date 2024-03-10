@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+  <script src="https://d3js.org/d3.v4.js"></script>
   <head>
     <meta charset="UTF-8">
     <meta name="description" content="{{site_description}}">
@@ -9,6 +10,27 @@
     <title>{% if page_title %}{{page_title|safe}}{% else %}{{site_name | default("Djehuty", True)}}{% endif %}</title>
     <link rel='shortcut icon' type='image/x-icon' href='/static/images/favicon.ico'>
     <link rel="stylesheet" type="text/css" href="/static/css/main.css">
+    <style>
+      rect {
+        pointer-events: all;
+        fill-opacity: 0;
+        stroke-opacity: 0;
+        z-index: 1;
+      }
+  
+      .tooltip {
+      position: absolute;
+      padding: 10px;
+      background-color: steelblue;
+      color: white;
+      border: 1px solid white;
+      border-radius: 10px;
+      display: none;
+      opacity: .75;
+    }
+  
+     
+    </style>
     {% block headers %}{% endblock %}
   </head>
   <body>

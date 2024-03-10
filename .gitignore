@@ -1,3 +1,7 @@
+djehuty-env 
+djehuty.log
+.djehuty-initialized
+data/*
 src/djehuty.egg-info/
 *__pycache__*
 dist/

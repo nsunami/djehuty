@@ -537,6 +537,9 @@ def read_configuration_file (server, config_file, address, port, state_graph,
         server.show_portal_summary = read_boolean_value (xml_root, "show-portal-summary",
                                                          server.show_portal_summary, logger)
 
+        server.show_graphs = read_boolean_value (xml_root, "show-graphs",
+                                                       server.show_graphs, logger)
+        
         server.show_institutions = read_boolean_value (xml_root, "show-institutions",
                                                        server.show_institutions, logger)
 
