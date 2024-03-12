@@ -93,9 +93,10 @@
     {% endfor %}
         </div>
 {% endif %}
-<div class="label">stats plot</div>
-            <div id="chart-container"></div>
-            <script>
+        <p> <br> <br></p>
+        <div class="label">stats plot</div>
+        <div id="chart-container"></div>
+        <script>
              // Set dimensions and margins for the chart
            
            const margin = { top: 14, right: 6, bottom: 8, left: 16 };
@@ -118,8 +119,8 @@
                .attr("height", height + margin.top + margin.bottom)
              .append("g")
                .attr("transform", `translate(${margin.left},${margin.top})`);
-           
-        // data retrieved from Endpoint(/v3/log-entry/search/<container_id>)
+
+        // data retrieved from Endpoint(/v3/log-entry/search/{{container_id}}tags?tag=${tag}&tags?tag=${tag})
         // const dataset2 =   [
         //    {"created": "2024-02-27T14:05:11"}, 
         //    {"created": "2024-02-15T17:35:23"}, 
@@ -173,7 +174,7 @@
              .attr("stroke", "steelblue")
              .attr("stroke-width", 1)
              .attr("d", line);
-             </script>
+        </script>
 
              
         <div id="categories">

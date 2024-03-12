@@ -4,6 +4,8 @@
 #wrapper #content #doi span     { color: #fff; background-color: #000; padding: 0px 5px 0px 5px }
 #wrapper #content #doi #container_doi       { display: none; position: absolute; background-color: #fff; width: 500px; border: 2px solid #000; padding:5px }
 #wrapper #content #doi:hover #container_doi { display: block }
+#wrapper #content #chart-container {background-color: #faeaea}
+#wrapper #content #chart-container:hover {background-color: #d7f5d4; display: block}
 #wrapper #content #type         { text-transform: uppercase; font-weight: bold }
 #wrapper #content #metadata #versions { margin-top: 0px }
 #wrapper #content #description  { margin-top: 10px; padding:10px; border: 1px solid #666; border-radius: 10px }
