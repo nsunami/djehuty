@@ -120,8 +120,8 @@
              .append("g")
                .attr("transform", `translate(${margin.left},${margin.top})`);
 
-            d3.json('/v3/log-entry/search/7f3447f0-e394-4fe9-9d78-1a74178448ff')
-            // d3.json('/v3/log-entry/search/{{container_id}}')
+            // d3.json('/v3/log-entry/search/7f3447f0-e394-4fe9-9d78-1a74178448ff')
+            d3.json('/v3/log-entry/search/{{item.container_uuid}}')
             // d3.json('/v3/log-entry/search/{{container_id}}tags?tag=${tag}&tags?tag=${tag}')
                 .then(function(dataset) {
                     // Work with the fetched data here
