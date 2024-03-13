@@ -3696,12 +3696,14 @@ class ApiServer:
                                          is_published=True,
                                          is_latest=True,
                                          limit=100)
+        categories = self.db.categories(limit=None)
         return self.__render_template (request, "search.html",
                                        search_for=search_for,
                                        articles=datasets,
                                        dataset_count=dataset_count,
                                        message=message,
                                        display_terms=display_list,
+                                       categories=categories,
                                        page_title=f"{search_for} (search)")
 
     def api_authorize (self, request):
