@@ -8,8 +8,8 @@
 .tile-item {
     display: inline-block;
     margin: 0pt 10pt 10pt 0pt;
-    padding: 10pt;
-    width: 135pt;
+    padding: 0.8em;
+    width: 10.5em;
     border-radius: 10pt;
     cursor: pointer;
     background: #f9f9f9;
@@ -32,7 +32,7 @@
     -webkit-box-orient: vertical;
     text-overflow: ellipsis;
     overflow: hidden;
-    max-width: 150pt;
+    max-width: 10.5em;
     height: 4em;
     font-size: 1.3em;
     font-weight: bold;
@@ -40,7 +40,7 @@
 .tile-preview {
     overflow: hidden;
     width: 100%;
-    height: 130pt;
+    height: 100pt;
     margin: 0 auto;
     user-select: none;
 }
@@ -69,10 +69,20 @@
     user-select: none;
     border-radius: .5em .5em 0em 0em;
 }
-.search-loader {
+#search-loader {
     background-image: url('/static/images/loader.svg');
     background-position: center;
     background-repeat: no-repeat;
+    color: darkgrey;
+    display: inline-block;
+    font-size: 2.5em;
+    font-style: italic;
+    padding-top: 5.0em;
+    text-align: center;
+    width: 100%;
+    z-index: 100;
+}
+#search-error {
     color: darkgrey;
     display: inline-block;
     font-size: 2.5em;
@@ -172,7 +182,18 @@
 }
 .filter-button-reset:hover { background: #cccccc; color: #000000; }
 .search-results {
+    padding-top: 1em;
     clear: right;
+}
+.search-results-pager {
+    display: flex;
+    justify-content: space-between;
+    flex-flow: row wrap;
+    width: 100%;
+    //&:after {
+    //    content: "";
+    //    flex: auto;
+    //}
 }
 #textinput-publisheddate-other-error {
     display: none;
@@ -183,40 +204,15 @@
 {% endblock %}
 {% block body %}
 
-<!--
-<ul class="search-terms">{% for item in display_terms %}
-  {% if item is mapping %}
-  <li><button>{{ item.operator | replace("||", "OR") | replace("&&", "AND") }}</button></li>
-  {% elif " " in item and not item.startswith(":") and not item.startswith("\"") %}
-  <li><a href='/search?search="{{item}}"'><button id="login-button">{{item}}</button></a></li>
-  {% else %}
-  <li><a href='/search?search={{item}}'><button id="login-button">{{item}}</button></a></li>
-  {% endif %}
-{% endfor %}</ul>
--->
-
 <script>
     jQuery(document).ready(function() {
-        let articles = {{ articles | tojson }};
-        let display_terms = {{ display_terms | tojson }};
-        get_search_filter_info();
-        filter_categories_showmore_toggle(true);
-        register_search_events();
-        read_filters_from_url();
-        //extra_render_search_page(articles, display_terms);
+        init_search_filter_info();
+        toggle_filter_categories_showmore(true);
+        register_event_handlers();
+        load_search_filters_from_url();
+        load_search_results();
     });
 </script>
-
-<!--
-{% if message is none %}
-<h2>Found results ({{ dataset_count}}):</h2>
-{% if dataset_count > 100 %}
-<p><i>Please note that only the first 100 records are displayed.</i></p>
-{% endif %}
-{% else: %}
-<h2>No results found ({{ message }})</h2>
-{% endif %}
--->
 
 <div class="search-container">
 
@@ -310,7 +306,7 @@
                     {% for category in categories | sort(attribute='title') %}
                     {% if not "parent_id" in category %}
                     <li>
-                        <input type="checkbox" id="checkbox_categories_{{category.id}}" name="checkbox_categories_{{category.id}}" value="{{category.id}}" onchange="checkbox_subcategories_toggle({{category.id}})">
+                        <input type="checkbox" id="checkbox_categories_{{category.id}}" name="checkbox_categories_{{category.id}}" value="{{category.id}}" onchange="toggle_checkbox_subcategories({{category.id}})">
                         <label for="checkbox_categories_{{category.id}}">{{category.title}}</label>
                     </li>
 
@@ -350,7 +346,7 @@
         </div>
 
         <!-- View mode -->
-        <div style="float: right; text-align: right;">
+        <div style="float: right; text-align: right; margin-right: 1em">
             <b>View</b>
             <div style="justify-content: space-between; padding: 5pt 0pt 5pt 0pt;">
                 <a href="#"><span class="fas fa-tile fa-lg" id="tile_view_mode" style="color: #f49120"><span class="hidden">Tile View</span></span></a>
@@ -358,12 +354,15 @@
             </div>
         </div>
 
+        <div id="search-loader" style="display: none;">Loading...</div>
+        <div id="search-error" style="display: none;"></div>
+
         <!-- Search results -->
         <div class="search-results" id="search-results">
-            <!-- <div class="search-loader">Loading...</div> -->
+            <div class="search-results-box" id="search-results-box">
+            </div>
         </div>
         <!-- End of Search results -->
-
     </div>
     <!-- End of Search Content -->
 </div>

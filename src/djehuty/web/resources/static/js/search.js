@@ -1,7 +1,8 @@
 const enable_subcategories = true;
+const page_size = 100;
 let filter_info = {};
 
-function get_search_filter_info() {
+function init_search_filter_info() {
     jQuery(`.search-filter-content`).each(function() {
         let filter_id = this.id;
         let filter_name = filter_id.split("-").pop();
@@ -25,132 +26,7 @@ function parse_url_params() {
     return params;
 }
 
-function extra_render_search_page(articles, display_terms) {
-    let articles_fields = {};
-
-    // In fact, articles don't have tag field.
-    let fields_mapping = {
-        "title":          {"short_name": "title",    "long_name": "Keyword(s) found in Title"},
-        "resource_title": {"short_name": "resource", "long_name": "Keyword(s) found in Resource Title"},
-        "description":    {"short_name": "desc",     "long_name": "Keyword(s) found in Description"},
-        "citation":       {"short_name": "cite",     "long_name": "Keyword(s) found in Citation"},
-        "format":         {"short_name": "format",   "long_name": "Keyword(s) found in Format"},
-        "tag":            {"short_name": "tag",      "long_name": "Keyword(s) found in Keyword"}
-    }
-
-    let enable_fields_palette = false;
-    let fields_pallet = {
-        "title":          "#FF70A6",
-        "resource_title": "#F570FF",
-        "description":    "#FF9770",
-        "citation":       "#FFB700",
-        "format":         "#ABC900",
-        "tag":            "#9EBA00"
-    };
-
-    articles.forEach(function (article, article_index) {
-        let match_fields = [];
-        display_terms.forEach(function (display_term) {
-            // if display_term's type is not string, then skip.
-            if (typeof display_term !== "string") {
-                return;
-            }
-
-            // if display_term has '^:.+: ' in regular expression, then remove it.
-            display_term = display_term.replace(/^:.+: /, "");
-            for (let field_name in fields_mapping) {
-                if (field_name in article && article[field_name].toLowerCase().includes(display_term.toLowerCase())) {
-                    match_fields.push(field_name);
-                }
-            }
-        });
-        let div_match = document.getElementById(`article_${(article_index + 1)}`);
-        let match_fields_uniq = match_fields.filter((value, index) => match_fields.indexOf(value) === index);
-        if (match_fields_uniq.length > 0) {
-            articles_fields[article_index] = match_fields_uniq;
-        } else {
-            articles_fields[article_index] = ["tag"];
-        }
-
-        if (article_index in articles_fields) {
-            articles_fields[article_index].forEach(function (match_field) {
-                if (enable_fields_palette) {
-                    jQuery(`<span class="match-badge" style="background-color: ${fields_pallet[match_field]}" title="${fields_mapping[match_field]["long_name"]}">${fields_mapping[match_field]["short_name"]}</span>`).appendTo(div_match);
-                } else {
-                    jQuery(`<span class="match-badge" title="${fields_mapping[match_field]["long_name"]}">${fields_mapping[match_field]["short_name"]}</span>`).appendTo(div_match);
-                }
-            });
-        }
-    });
-
-    jQuery('#list_view_mode').click(function() {
-        jQuery('.tile-item').hide();
-        jQuery('.list-item').show();
-        jQuery('#tile_view_mode').css('color', 'darkgray');
-        jQuery('#list_view_mode').css('color', '#f49120');
-
-        if (jQuery('.list-item').html().length === 0) {
-            jQuery("#search-result-wrapper").addClass("loader");
-            jQuery("#search-result tbody tr").css('opacity', '0.15');
-
-            let table_html = '';
-            table_html += '<table id="search-result" class="corporate-identity-table">';
-            table_html += '<thead><tr><th>Dataset</th><th style="padding-right:20px;">Posted On</th></tr></thead>';
-            table_html += '<tbody>';
-            articles.forEach(function (article, article_index) {
-                let posted_on = article.timeline_posted;
-                let title = article.title;
-                if (posted_on.includes("T")) {
-                    posted_on = posted_on.split("T")[0];
-                }
-                let badge_html = '';
-                let badge_string_length = 0;
-                if (article_index in articles_fields) {
-                    articles_fields[article_index].forEach(function (match_field) {
-                        if (enable_fields_palette) {
-                            badge_html += `<span class="match-badge" style="background-color: ${fields_pallet[match_field]}" title="${fields_mapping[match_field]["long_name"]}">${fields_mapping[match_field]["short_name"]}</span>`;
-                        } else {
-                            badge_html += `<span class="match-badge" title="${fields_mapping[match_field]["long_name"]}">${fields_mapping[match_field]["short_name"]}</span>`;
-                        }
-                        badge_string_length += fields_mapping[match_field]["short_name"].length;
-                    });
-                }
-                if (badge_string_length) {
-                    badge_string_length += 10;
-                }
-                max_title_length = 150 - badge_string_length;
-                if (title.length > max_title_length) {
-                    title = title.substring(0, max_title_length) + '...';
-                }
-                table_html += '<tr>';
-                table_html += `<td><div style="float: left;"><a href="/datasets/${article.container_uuid}">${title}</a></div><div style="float: right;">${badge_html}</div></td><td style="padding-right:20px;">${posted_on}</td>`;
-                table_html += '</tr>';
-            });
-            table_html += '</tbody></table>';
-
-            jQuery('.list-item').html(table_html);
-
-            jQuery("#search-result").DataTable({
-                "order": [[ 1, 'desc' ]],
-                "bInfo" : false,
-                "paging": false,
-                "searching": false,
-                "lengthChange": false,
-            });
-
-            jQuery("#search-result").show();
-        };
-    });
-
-    jQuery('#tile_view_mode').click(function() {
-        jQuery('.list-item').hide();
-        jQuery('.tile-item').show();
-        jQuery('#list_view_mode').css('color', 'darkgray');
-        jQuery('#tile_view_mode').css('color', '#f49120');
-    });
-};
-
-function checkbox_subcategories_toggle(parent_category_id) {
+function toggle_checkbox_subcategories(parent_category_id) {
     let parent_category_checkbox = document.getElementById(`checkbox_categories_${parent_category_id}`);
     let subcategories = document.getElementById(`subcategories_of_${parent_category_id}`);
     if (subcategories === null) {
@@ -166,11 +42,11 @@ function checkbox_subcategories_toggle(parent_category_id) {
     }
 }
 
-function filter_categories_showmore_toggle(flag) {
+function toggle_filter_categories_showmore(flag) {
     if (enable_subcategories) {
         jQuery(`#search-filter-content-categories input[type='checkbox']`).each(function() {
             if (this.id.startsWith("checkbox_categories_")) {
-                checkbox_subcategories_toggle(this.id.split("_")[2]);
+                toggle_checkbox_subcategories(this.id.split("_")[2]);
             }
         });
     }
@@ -189,7 +65,7 @@ function filter_categories_showmore_toggle(flag) {
    }
 }
 
-function filter_apply_button_toggle(flag) {
+function toggle_filter_apply_button(flag) {
     let color = flag ? "#f49120" : "#eeeeee";
     let cursor = flag ? "pointer" : "default";
     let color_text = flag ? "white" : "#cccccc";
@@ -198,7 +74,7 @@ function filter_apply_button_toggle(flag) {
     jQuery("#search-filter-apply-button").addClass(classes[0]).removeClass(classes[1]);
 }
 
-function filter_input_text_toggle(id, flag) {
+function toggle_filter_input_text(id, flag) {
     if (flag) {
         jQuery(`#${id}`).show();
     } else {
@@ -207,22 +83,22 @@ function filter_input_text_toggle(id, flag) {
     }
 }
 
-function register_search_events() {
+function register_event_handlers() {
     // reset all checkboxes if the reset button is clicked.
     jQuery("#search-filter-reset-button").click(function() {
         jQuery(".search-filter-content input[type='checkbox']").each(function() {
             this.checked = false;
             jQuery(`.search-filter-content input[type='text']`).each(function() {
-                filter_input_text_toggle(this.id, false);
+                toggle_filter_input_text(this.id, false);
             });
         });
-        filter_apply_button_toggle(true);
-        filter_categories_showmore_toggle(true);
+        toggle_filter_apply_button(true);
+        toggle_filter_categories_showmore(true);
     });
 
     // show more categories if 'Show more' text is clicked.
     jQuery('#show-categories-more').click(function() {
-        filter_categories_showmore_toggle(false);
+        toggle_filter_categories_showmore(false);
     });
 
     // Enable the apply button if any checkbox is checked.
@@ -230,14 +106,14 @@ function register_search_events() {
         let is_checked = false;
         jQuery(".search-filter-content input[type='checkbox']").each(function() {
             if (this.checked) {
-                filter_apply_button_toggle(true);
+                toggle_filter_apply_button(true);
                 is_checked = true;
                 return;
             }
         });
 
         if (is_checked == false) {
-            filter_apply_button_toggle(true);
+            toggle_filter_apply_button(true);
         }
     });
 
@@ -254,7 +130,7 @@ function register_search_events() {
                         this.checked = false;
                         jQuery(`#${event_id} input[type='text']`).each(function() {
                             this.value = "";
-                            filter_input_text_toggle(this.id, false);
+                            toggle_filter_input_text(this.id, false);
                         });
                     });
                     target_element.checked = true;
@@ -263,7 +139,7 @@ function register_search_events() {
 
             if (target_element.id.split("_").pop() === "other") {
                 jQuery(`#${event_id} input[type='text']`).each(function() {
-                    filter_input_text_toggle(this.id, target_element.checked);
+                    toggle_filter_input_text(this.id, target_element.checked);
                 });
             }
         });
@@ -318,10 +194,10 @@ function register_search_events() {
 
     jQuery("#textinput_publisheddate_other").keyup(validate_publisheddate_other);
     jQuery("#textinput_institutions_other").keyup(function() {
-        filter_apply_button_toggle(true);
+        toggle_filter_apply_button(true);
     });
     jQuery("#textinput_filetypes_other").keyup(function() {
-        filter_apply_button_toggle(true);
+        toggle_filter_apply_button(true);
     });
 
 }
@@ -362,7 +238,7 @@ function validate_publisheddate_other() {
             return 1;
         }
         jQuery(`#${div_error_id}`).text("Valid date format.").css("color", "green");
-        filter_apply_button_toggle(true);
+        toggle_filter_apply_button(true);
         return 0;
 
     } catch (error) {
@@ -372,7 +248,7 @@ function validate_publisheddate_other() {
     }
 }
 
-function read_filters_from_url() {
+function load_search_filters_from_url() {
     let url_params = parse_url_params();
     if (Object.keys(url_params).length > 0) {
         for (let param_name of Object.keys(url_params)) {
@@ -390,9 +266,9 @@ function read_filters_from_url() {
                     if (checkbox_id_element.length > 0) {
                         jQuery(`#${checkbox_id}`).prop("checked", true);
                         if (filter_name == "categories") {
-                            filter_categories_showmore_toggle(true);
+                            toggle_filter_categories_showmore(true);
                             if (enable_subcategories) {
-                                filter_categories_showmore_toggle(false);
+                                toggle_filter_categories_showmore(false);
                             }
                         }
                     }
@@ -404,7 +280,7 @@ function read_filters_from_url() {
                     let input_text_id_element = jQuery(`#${input_text_id}`);
                     if (input_text_id_element.length > 0) {
                         input_text_id_element.val(other_value);
-                        filter_input_text_toggle(input_text_id, true);
+                        toggle_filter_input_text(input_text_id, true);
                     }
                     let checkbox_id = `checkbox_${filter_name}_other`;
                     let checkbox_id_element = jQuery(`#${checkbox_id}`);
@@ -419,4 +295,139 @@ function read_filters_from_url() {
     }
 }
 
+function load_search_results() {
+    // +-----------------+-----------------+--------------------------------+
+    // | db.datasets()   | API args        | Value                          |
+    // +=================+=================+================================+
+    // | categories      | categories      | Comma separated integers       |
+    // | groups          | groups          | A group_id                     |
+    // | item_type       | item_type       | djht:defined_type (0, 3, or 9) |
+    // | offset          | offset          | A number                       |
+    // | limit           | limit           | A number                       |
+    // | search_format   | format          | A boolean                      |
+    // | order           | order           | 'title', 'published_date'      |
+    // | published_since | published_since | DD-MM-YYYY                     |
+    // | search_for      | search_for      | A string                       |
+    // +-----------------+-----------------+--------------------------------+
+    // $ curl -X POST 'https://data.4tu.nl/v2/articles/search' -H 'Content-Type: application/json' --data '{"group": 28589}'
 
+    let api_dataset_url    = "/v2/articles/search";
+    let api_collection_url = "/v2/collections/search";
+    let request_params     = parse_url_params();
+    let target_api_url     = null;
+
+    if ("datatypes" in request_params && request_params["datatypes"] === "collection") {
+        target_api_url = api_collection_url;
+    } else {
+        target_api_url = api_dataset_url;
+        request_params["item_types"] = request_params["datatypes"];
+    }
+
+    request_params["search_for"] = request_params["search"];
+    request_params["group"] = request_params["institutions"];
+    request_params["page_size"] = page_size;
+    if (!("page" in request_params)) {
+        request_params["page"] = 1;
+    }
+
+    jQuery("#search-loader").show();
+    jQuery("#search-error").hide();
+
+    jQuery.ajax({
+        url:         `/v2/articles/search`,
+        type:        "POST",
+        contentType: "application/json",
+        accept:      "application/json",
+        data:        JSON.stringify(request_params),
+        dataType:    "json"
+    }).done(function (data) {
+        try {
+            console.log(data);
+            if (data.length == 0) {
+                let error_message = `No search results...`;
+                jQuery("#search-error").html(error_message);
+                jQuery("#search-error").show();
+            }
+            render_search_results(data, request_params["page"]);
+        } catch (error) {
+            let error_message = `Failed to get search results` +
+                                `<br>reason: ${error}`;
+            jQuery("#search-error").html(error_message);
+            jQuery("#search-error").show();
+        }
+    }).fail(function (jqXHR, status, error) {
+        let error_message = `Failed to get search results` +
+                            `<br><br>status: ${status}` +
+                            `<br>reason: ${error}`;
+        jQuery("#search-error").html(error_message);
+        jQuery("#search-error").show();
+    }).always(function () {
+        jQuery("#search-loader").hide();
+    });
+}
+
+function render_search_results(data, page_number) {
+    let html = "";
+    for (let item of data) {
+        if (!("timeline" in item)) {
+            // Usually, embargoed datasets don't have timeline.
+            continue;
+        }
+
+        let preview_thumb = "/static/images/dataset-thumb.svg";
+        if ("thumb" in item && typeof(item.thumb) === "string" && item.thumb.length > 0 && !(item.thumb.startsWith("https://ndownloader"))) {
+            preview_thumb = item.thumb;
+        }
+
+        html += `<div class="tile-item">`;
+        html += `<a href="${item.url_public_html}">`;
+        html += `<img class="tile-preview" src="${preview_thumb}" aria-hidden="true" alt="thumbnail for ${item.uuid}" />`;
+        html += `</a>`;
+        html += `<div class="tile-matches" id="article_${item.uuid}"></div>`;
+        html += `<div class="tile-title"><a href="/datasets/${item.uuid}">${item.title}</a></div>`;
+        html += `<div class="tile-date">Posted on ${item.timeline.posted}</div>`;
+        html += `<div class="tile-authors"> </div>`;
+        html += `</div>`;
+    }
+
+    html += get_pager_html(data, page_number);
+    jQuery(".search-results").html(html);
+}
+
+function get_pager_html(data, current_page=1) {
+    let prev_page = Number(current_page) - 1;
+    let next_page = Number(current_page) + 1;
+    let html = "";
+
+    if (data.length < page_size) {
+        if (current_page === 1) {
+            prev_page = null;
+        } else {
+            next_page = null;
+        }
+    } else {
+        if (current_page === 1) {
+            prev_page = null;
+        }
+    }
+
+    let new_url_link = new URL(window.location.href);
+    new_url_link.searchParams.delete('page');
+    html += `<div class="search-results-pager">`;
+    if (prev_page) {
+        new_url_link.searchParams.append('page', prev_page);
+        html += `<div><a href="${new_url_link.href}" class="pager-prev">Previous</a></div>`;
+    } else {
+        html += `<div>Previous</div>`;
+    }
+
+    if (next_page) {
+        new_url_link.searchParams.append('page', next_page);
+        html += `<div><a href="${new_url_link.href}" class="pager-next">Next</a></div>`;
+    } else {
+        html += `<div>Next</div>`;
+    }
+    html += `</div>`;
+
+    return html;
+}
