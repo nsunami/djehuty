@@ -74,7 +74,6 @@ class ApiServer:
         self.sandbox_message  = False
         self.notice_message   = False
         self.show_portal_summary = True
-        self.show_graphs = True
         self.show_institutions = True
         self.show_science_categories = True
         self.show_latest_datasets = True
@@ -2734,7 +2733,6 @@ class ApiServer:
                                        latest = latest,
                                        notice_message = self.notice_message,
                                        show_portal_summary = self.show_portal_summary,
-                                       show_graphs = self.show_graphs,
                                        show_institutions = self.show_institutions,
                                        show_science_categories = self.show_science_categories,
                                        show_latest_datasets = self.show_latest_datasets)
