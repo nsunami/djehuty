@@ -96,35 +96,96 @@
         <p> <br> <br></p>
         <div class="label">stats plot</div>
         <div id="chart-container"></div>
-        <script>
-            d3.json('/v3/log-entry/search/{{item.container_uuid}}')
-                .then(function(dataset) {
-                    // Convert timestamps to Date objects
-                     const data = dataset.map(d => ({ created: new Date(d.created) }));
-                    
-                    // Rollup data per day
-                    const rollupData = d3.rollup(data, 
-                    v => v.length,  // Aggregation function (count)
-                    d => d3.timeDay(d.created) // per day
-                    );
-
-                    console.log(rollupData);
-
-                    // Create SVG here
-                    // Set up dimensions and margins
-                    const margin = { top: 14, right: 6, bottom: 8, left: 16 };
-                    const width = 240 - margin.left - margin.right;
-                    const height = 100 - margin.top - margin.bottom;     
-                    
-                    
-                })
-                .catch(function(error) {
-                    console.error("Error fetching data: " + error);
+                <script>
+                d3.json('/v3/log-entry/search/{{item.container_uuid}}')
+                .then(function (data) {            
+                // Parse dates
+                const parseTime = d3.timeParse("%Y-%m-%dT%H:%M:%S");
+                data.forEach(d => {
+                    d.created = parseTime(d.created);
                 });
-        
-        </script>
 
-             
+                // Rollup data per day
+                const rollupData = d3.rollup(data,
+                    v => v.length,  // Aggregation function (count)
+                    d => d3.timeDay(d.created) // Grouping function (per day)
+                );
+
+                // Convert rollupData map to array
+                const aggregatedData = Array.from(rollupData, ([key, value]) => ({ date: key, count: value }));
+
+                // Sort the aggregatedData array by date
+                aggregatedData.sort((a, b) => a.date - b.date);
+
+                // Set the dimensions of the canvas
+                var margin = { top: 10, right: 10, bottom: 20, left: 32 },
+                    width = 370 - margin.left - margin.right,
+                    height = 250 - margin.top - margin.bottom;
+
+                // Adds the svg canvas
+                var svg = d3.select("#chart-container").append("svg")
+                    .attr("width", width + margin.left + margin.right)
+                    .attr("height", height + margin.top + margin.bottom)
+                    .append("g")
+                    .attr("transform",
+                        "translate(" + margin.left + "," + margin.top + ")");
+
+                // Accumulate counts
+                let accumulatedData = [];
+                let accumulatedCount = 0;
+                aggregatedData.forEach(d => {
+                    accumulatedCount += d.count;
+                    accumulatedData.push({ date: d.date, count: accumulatedCount });
+                });
+                // Set up scales
+                const xScale = d3.scaleTime()
+                    .domain(d3.extent(accumulatedData, d => d.date))
+                    .range([0, width]);
+
+                const yScale = d3.scaleLinear()
+                    .domain([0, d3.max(accumulatedData, d => d.count)])
+                    .range([height, 0]);
+
+                // Define the area generator
+                const area = d3.area()
+                    .x(d => xScale(d.date))
+                    .y0(height)
+                    .y1(d => yScale(d.count));
+
+                // Define the line generator
+                const line = d3.line()
+                    .x(d => xScale(d.date))
+                    .y(d => yScale(d.count));
+
+
+                // Draw the area
+                svg.append("path")
+                    .datum(accumulatedData)
+                    .attr("fill", "#A0153E")
+                    .attr("d", area);
+
+                // Draw the line
+                svg.append("path")
+                    .datum(aggregatedData)
+                    .attr("fill", "none")
+                    .attr("stroke", "#FF204E")
+                    .attr("stroke-width", 3)
+                    .attr("d", line);
+
+                // Add X axis
+                svg.append("g")
+                    .attr("transform", `translate(0,${height})`)
+                    .call(d3.axisBottom(xScale));
+
+                // Add Y axis
+                svg.append("g")
+                    .call(d3.axisLeft(yScale));
+            })
+            .catch(function (error) {
+                console.error("Error fetching data: " + error);
+            });
+            </script>
+        
         <div id="categories">
             <div class="label">categories</div>
             <ul>
@@ -243,7 +304,7 @@
                   <li>{{date}} {{dtype}}</li>
             </ul>
 {% endfor %}
-        </div>
+</div>
 {% if item.publisher %}
         <div id="publisher">
             <div class="label">publisher</div>
