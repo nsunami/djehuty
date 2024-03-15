@@ -6,6 +6,8 @@
 #wrapper #content #doi:hover #container_doi { display: block }
 #wrapper #content #chart-container {background-color: #ffeaeaeb}
 #wrapper #content #chart-container:hover {background-color: #ffc2c2; display: block}
+#wrapper #content #chart-container rect { pointer-events: all; fill-opacity: 0; stroke-opacity: 0; z-index: 1; }
+#wrapper #content #chart-container .tooltip {position: absolute; background-color: #5D0E41; border: 1px solid #ddd; border-radius: 5px; padding: 10px; pointer-events: none; display: none; font-size: 13px}
 #wrapper #content #type         { text-transform: uppercase; font-weight: bold }
 #wrapper #content #metadata #versions { margin-top: 0px }
 #wrapper #content #description  { margin-top: 10px; padding:10px; border: 1px solid #666; border-radius: 10px }
