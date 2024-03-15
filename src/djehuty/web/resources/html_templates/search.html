@@ -34,7 +34,7 @@
     overflow: hidden;
     max-width: 10.5em;
     height: 4em;
-    font-size: 1.3em;
+    font-size: 1.1em;
     font-weight: bold;
 }
 .tile-preview {
@@ -187,13 +187,16 @@
 }
 .search-results-pager {
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     flex-flow: row wrap;
     width: 100%;
     //&:after {
     //    content: "";
     //    flex: auto;
     //}
+}
+.search-results-pager div {
+    padding: 0.5em 0.5em 0.5em 0.5em;
 }
 #textinput-publisheddate-other-error {
     display: none;
@@ -252,7 +255,6 @@
                     <li> <label for="checkbox_datatypes_3"><input type="checkbox" id="checkbox_datatypes_3" name="dataset" value="3">Dataset</label> </li>
                     <li> <label for="checkbox_datatypes_9"><input type="checkbox" id="checkbox_datatypes_9" name="software" value="9">Software</label> </li>
                     <li> <label for="checkbox_datatypes_collection"><input type="checkbox" id="checkbox_datatypes_collection" name="collection" value="collection">Collection</label> </li>
-                    <li> <label for="checkbox_datatypes_etc"><input type="checkbox" id="checkbox_datatypes_etc" name="etc" value="etc">Etc</label> </li>
                 </ul>
             </div>
         </div>
@@ -263,7 +265,6 @@
                 <ul>
                     <li> <label for="checkbox_searchscope_title"><input type="checkbox" id="checkbox_searchscope_title" name="title" value="title">Title</label> </li>
                     <li> <label for="checkbox_searchscope_description"><input type="checkbox" id="checkbox_searchscope_description" name="description" value="description">Description</label> </li>
-                    <li> <label for="checkbox_searchscope_citation"><input type="checkbox" id="checkbox_searchscope_citation" name="citation" value="citation">Citation</label> </li>
                     <li> <label for="checkbox_searchscope_tag"><input type="checkbox" id="checkbox_searchscope_tag" name="tag" value="tag">Keyword</label> </li>
                 </ul>
             </div>

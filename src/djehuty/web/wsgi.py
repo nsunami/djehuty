@@ -7903,11 +7903,15 @@ class ApiServer:
 
     def parse_search_terms (self, search_for):
         """Procedure to parse search terms and operators in a string"""
+        if not isinstance(search_for, str):
+            return search_for
+
         search_for = search_for.strip()
         operators_mapping = {"(":"(", ")":")", "AND":"&&", "OR":"||"}
         operators = operators_mapping.keys()
 
-        fields = ["title", "resource_title", "description", "citation", "format", "tag"]
+        fields = ["title", "resource_title", "description",
+                  "format", "tag", "organizations"]
         re_field = ":(" + "|".join(fields+["search_term"]) + "):"
 
         search_tokens = re.findall(r'[^" ]+|"[^"]+"|\([^)]+\)', search_for)
@@ -7974,6 +7978,7 @@ class ApiServer:
                     search_dict[field] = search_term
                 search_tokens[idx] = search_dict
 
+        self.log.info("Search tokens: %s", search_tokens)
         return search_tokens
 
     def add_names_to_authors (self, authors):

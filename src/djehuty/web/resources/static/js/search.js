@@ -86,6 +86,7 @@ function toggle_filter_input_text(id, flag) {
 function register_event_handlers() {
     // reset all checkboxes if the reset button is clicked.
     jQuery("#search-filter-reset-button").click(function() {
+        jQuery(`#search-box-wrapper input [type='hidden']`).remove();
         jQuery(".search-filter-content input[type='checkbox']").each(function() {
             this.checked = false;
             jQuery(`.search-filter-content input[type='text']`).each(function() {
@@ -259,6 +260,11 @@ function load_search_filters_from_url() {
                 filter_name = param_name.split("_")[0];
                 is_other = true;
             }
+
+            if (filter_name !== "search" && filter_name !== "page") {
+                jQuery(`#search-box-wrapper form`).append(`<input type="hidden" name="${filter_name}" value="${values}">`);
+            }
+
             if (filter_name in filter_info) {
                 for (let value of values) {
                     let checkbox_id = `checkbox_${filter_name}_${value}`;
@@ -320,10 +326,68 @@ function load_search_results() {
         target_api_url = api_collection_url;
     } else {
         target_api_url = api_dataset_url;
-        request_params["item_types"] = request_params["datatypes"];
+        request_params["item_type"] = request_params["datatypes"];
     }
 
-    request_params["search_for"] = request_params["search"];
+    let search_for = null;
+    if ("searchscope" in request_params && typeof(request_params["searchscope"]) === "string" && request_params["searchscope"].length > 0) {
+        let temp_search_for = "";
+        let items = request_params["searchscope"];
+        let iterated = 0;
+        for (let scope of items.split(",")) {
+            iterated += 1;
+            temp_search_for += `:${scope}: ${request_params["search"]} OR `;
+        }
+        if (temp_search_for.endsWith(" OR ")) {
+            temp_search_for = temp_search_for.slice(0, -4);
+        }
+        if (temp_search_for.length > 0) {
+            if (iterated > 1) {
+                search_for = `( ${temp_search_for} )`;
+            } else {
+                search_for = `${temp_search_for}`;
+            }
+        }
+    }
+
+    if ("filetypes" in request_params && typeof(request_params["filetypes"]) === "string" && request_params["filetypes"].length > 0) {
+        let temp_search_for = "";
+        let items = request_params["filetypes"];
+        let iterated = 0;
+        for (let scope of items.split(",")) {
+            iterated += 1;
+            temp_search_for += `:format: ${scope} OR `;
+        }
+        if (temp_search_for.endsWith(" OR ")) {
+            temp_search_for = temp_search_for.slice(0, -4);
+        }
+        if (temp_search_for.length > 0) {
+            if (search_for) {
+                if (iterated > 1) {
+                    search_for += ` AND ( ${temp_search_for} )`;
+                } else {
+                    search_for += ` AND ${temp_search_for}`;
+                }
+            } else {
+                search_for += `${temp_search_for}`;
+            }
+        }
+    }
+
+    if ("publisheddate" in request_params && typeof(request_params["publisheddate"]) === "string" && request_params["publisheddate"].length > 0) {
+        let today = new Date();
+        let year = today.getFullYear() - request_params["publisheddate"];
+        let new_date = new Date(year, 0, 1);
+        let since_date = new_date.toISOString()
+        request_params["published_since"] = `${since_date}`;
+    }
+
+    if (search_for) {
+        request_params["search_for"] = search_for;
+    } else {
+        request_params["search_for"] = request_params["search"];
+    }
+
     request_params["group"] = request_params["institutions"];
     request_params["page_size"] = page_size;
     if (!("page" in request_params)) {
@@ -332,6 +396,8 @@ function load_search_results() {
 
     jQuery("#search-loader").show();
     jQuery("#search-error").hide();
+
+    console.log(request_params);
 
     jQuery.ajax({
         url:         `/v2/articles/search`,
@@ -342,7 +408,6 @@ function load_search_results() {
         dataType:    "json"
     }).done(function (data) {
         try {
-            console.log(data);
             if (data.length == 0) {
                 let error_message = `No search results...`;
                 jQuery("#search-error").html(error_message);
@@ -379,13 +444,27 @@ function render_search_results(data, page_number) {
             preview_thumb = item.thumb;
         }
 
+        let posted_date = item.timeline.posted;
+        if (posted_date.includes("T")) {
+            posted_date = posted_date.split("T")[0];
+        }
+
+        let revision = null;
+        if ("revision" in item.timeline && item.timeline.revision !== null) {
+            revision = item.timeline.revision;
+        }
+
         html += `<div class="tile-item">`;
         html += `<a href="${item.url_public_html}">`;
         html += `<img class="tile-preview" src="${preview_thumb}" aria-hidden="true" alt="thumbnail for ${item.uuid}" />`;
         html += `</a>`;
         html += `<div class="tile-matches" id="article_${item.uuid}"></div>`;
         html += `<div class="tile-title"><a href="/datasets/${item.uuid}">${item.title}</a></div>`;
-        html += `<div class="tile-date">Posted on ${item.timeline.posted}</div>`;
+
+        if (revision) {
+            html += `<div class="tile-revision">Revision ${revision}</div>`;
+        }
+        html += `<div class="tile-date">Posted on ${posted_date}</div>`;
         html += `<div class="tile-authors"> </div>`;
         html += `</div>`;
     }
@@ -402,6 +481,7 @@ function get_pager_html(data, current_page=1) {
     if (data.length < page_size) {
         if (current_page === 1) {
             prev_page = null;
+            next_page = null;
         } else {
             next_page = null;
         }
@@ -418,14 +498,14 @@ function get_pager_html(data, current_page=1) {
         new_url_link.searchParams.append('page', prev_page);
         html += `<div><a href="${new_url_link.href}" class="pager-prev">Previous</a></div>`;
     } else {
-        html += `<div>Previous</div>`;
+        html += `<div></div>`;
     }
 
     if (next_page) {
         new_url_link.searchParams.append('page', next_page);
         html += `<div><a href="${new_url_link.href}" class="pager-next">Next</a></div>`;
     } else {
-        html += `<div>Next</div>`;
+        html += `<div></div>`;
     }
     html += `</div>`;
 
