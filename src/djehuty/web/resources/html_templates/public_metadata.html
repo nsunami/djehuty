@@ -159,7 +159,7 @@
                     .y(d => yScale(d.count));
 
                 // Add tooltip
-                 const tooltip = d3.select("#chart-container").append("div")
+                 var tooltip = d3.select("#chart-container").append("div")
                     .attr("class", "tooltip")
                     .style("opacity", 1);
                 
@@ -179,6 +179,7 @@
                 // Draw the area
                 svg.append("path")
                     .datum(accumulatedData)
+                    .attr("class", "area")
                     .attr("fill", "#A0153E")
                     .attr("d", area);
 
@@ -225,7 +226,7 @@
                     // add in  our tooltip
                     tooltip
                     .style("display", "block")
-                    .style("left", `${xPos + 1000}px`) //100
+                    .style("left", `${xPos +700 }px`) //100
                     .style("top", `${yPos + 500}px`) //50
                     .html(`<strong>Date:</strong> ${d.date.toLocaleDateString('en-GB')}<br><strong>Total views:</strong> ${d.count !== undefined ? (d.count).toFixed(0) : 'N/A'} <br> <strong>Daily views:</strong> ${d2.count !== undefined ? (d2.count).toFixed(0) : 'N/A' } `)
                 });
