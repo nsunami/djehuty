@@ -119,7 +119,7 @@
                 aggregatedData.sort((a, b) => a.date - b.date);
 
                 // Set the dimensions of the canvas
-                var margin = { top: 10, right: 10, bottom: 20, left: 32 },
+                var margin = { top: 30, right: 10, bottom: 20, left: 32},
                     width = 370 - margin.left - margin.right,
                     height = 250 - margin.top - margin.bottom;
 
@@ -175,30 +175,30 @@
                 const listeningRect = svg.append("rect")
                     .attr("width", width)
                     .attr("height", height);
-
+                
                 // Draw the area
                 svg.append("path")
-                    .datum(accumulatedData)
-                    .attr("class", "area")
-                    .attr("fill", "#A0153E")
-                    .attr("d", area);
-
+                .datum(accumulatedData)
+                .attr("class", "area")
+                .attr("fill", "#A0153E")
+                .attr("d", area);
+                
                 // Draw the line
                 svg.append("path")
-                    .datum(aggregatedData)
-                    .attr("fill", "none")
-                    .attr("stroke", "#FF204E")
-                    .attr("stroke-width", 3)
-                    .attr("d", line);
-
+                .datum(aggregatedData)
+                .attr("fill", "none")
+                .attr("stroke", "#FF204E")
+                .attr("stroke-width", 3)
+                .attr("d", line);
+                
                 // Add X axis
                 svg.append("g")
-                    .attr("transform", `translate(0,${height})`)
-                    .call(d3.axisBottom(xScale));
-
+                .attr("transform", `translate(0,${height})`)
+                .call(d3.axisBottom(xScale));
+                
                 // Add Y axis
                 svg.append("g")
-                    .call(d3.axisLeft(yScale));
+                .call(d3.axisLeft(yScale));
                 
                 // create the mouse move function
                 listeningRect.on("mousemove", function (event) {
@@ -212,8 +212,8 @@
                     const d = x0 - d0.date > d1.date - x0 ? d1 : d0;
                     const xPos = xScale(d.date);
                     const yPos = yScale(d.count);
-
-
+                    
+                    
                     // Update the circle position
                     circle.attr("cx", xPos)
                     .attr("cy", yPos);
@@ -226,7 +226,7 @@
                     // add in  our tooltip
                     tooltip
                     .style("display", "block")
-                    .style("left", `${xPos +700 }px`) //100
+                    .style("left", `${xPos + 750}px`) //100
                     .style("top", `${yPos + 500}px`) //50
                     .html(`<strong>Date:</strong> ${d.date.toLocaleDateString('en-GB')}<br><strong>Total views:</strong> ${d.count !== undefined ? (d.count).toFixed(0) : 'N/A'} <br> <strong>Daily views:</strong> ${d2.count !== undefined ? (d2.count).toFixed(0) : 'N/A' } `)
                 });
@@ -237,8 +237,31 @@
                     .duration(50)
                     .attr("r", 0);
 
-    tooltip.style("display", "none");
-  });
+                tooltip.style("display", "none");
+            });
+
+                // Add the chart title
+                svg.append("text")
+                    .attr("class", "chart-title")
+                    .attr("x", margin.left + 20 )
+                    .attr("y", margin.top - 40  )
+                    .style("font-size", "12px")
+                    .style("font-weight", "bold")
+                    .style("font-family", "sans-serif")
+                    .text("Daily and total views since publication");
+
+                
+                // Add Y-axis label
+                // svg.append("text")
+                //     .attr("transform", "rotate(-90)")
+                //     .attr("y", 0 - margin.left)
+                //     .attr("x", 0 - (height / 2))
+                //     .attr("dy", "1em")
+                //     .style("text-anchor", "middle")
+                //     .style("font-size", "14px")
+                //     .style("fill", "#777")
+                //     .style("font-family", "sans-serif")
+                //     .text("views");
 
             })
             .catch(function (error) {
