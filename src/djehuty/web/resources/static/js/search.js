@@ -169,6 +169,7 @@ function register_event_handlers() {
     });
 
     // Enable the apply button if any checkbox is checked.
+    // If collection is checked, disable Search Scope and File Types.
     jQuery(".search-filter-content input[type='checkbox']").change(function() {
         let is_checked = false;
         jQuery(".search-filter-content input[type='checkbox']").each(function() {
@@ -181,6 +182,18 @@ function register_event_handlers() {
 
         if (is_checked == false) {
             toggle_filter_apply_button(true);
+        }
+
+        if (this.id === "checkbox_datatypes_collection") {
+            let flag = this.checked ? true : false;
+            jQuery("#search-filter-content-searchscope input[type='checkbox']").each(function() {
+                this.disabled = flag;
+                this.checked = false;
+            });
+            jQuery("#search-filter-content-filetypes input[type='checkbox']").each(function() {
+                this.disabled = flag;
+                this.checked = false;
+            });
         }
     });
 
@@ -340,7 +353,12 @@ function load_search_filters_from_url() {
             }
 
             if (filter_name !== "search" && filter_name !== "page") {
-                jQuery(`#search-box-wrapper form`).append(`<input type="hidden" name="${filter_name}" value="${values}">`);
+                console.log(`filter_name: ${filter_name}, values: ${values}`);
+                if (is_other) {
+                    jQuery(`#search-box-wrapper form`).append(`<input type="hidden" name="${filter_name}_other" value="${values}">`);
+                } else {
+                    jQuery(`#search-box-wrapper form`).append(`<input type="hidden" name="${filter_name}" value="${values}">`);
+                }
             }
 
             if (filter_name in filter_info) {
@@ -355,6 +373,18 @@ function load_search_filters_from_url() {
                                 toggle_filter_categories_showmore(false);
                             }
                         }
+                    }
+
+                    // If collection is checked, disable Search Scope and File Types.
+                    if (checkbox_id === "checkbox_datatypes_collection") {
+                        jQuery("#search-filter-content-searchscope input[type='checkbox']").each(function() {
+                            this.disabled = true;
+                            this.checked = false;
+                        });
+                        jQuery("#search-filter-content-filetypes input[type='checkbox']").each(function() {
+                            this.disabled = true;
+                            this.checked = false;
+                        });
                     }
                 }
 
@@ -380,21 +410,6 @@ function load_search_filters_from_url() {
 }
 
 function load_search_results() {
-    // +-----------------+-----------------+--------------------------------+
-    // | db.datasets()   | API args        | Value                          |
-    // +=================+=================+================================+
-    // | categories      | categories      | Comma separated integers       |
-    // | groups          | groups          | A group_id                     |
-    // | item_type       | item_type       | djht:defined_type (0, 3, or 9) |
-    // | offset          | offset          | A number                       |
-    // | limit           | limit           | A number                       |
-    // | search_format   | format          | A boolean                      |
-    // | order           | order           | 'title', 'published_date'      |
-    // | published_since | published_since | DD-MM-YYYY                     |
-    // | search_for      | search_for      | A string                       |
-    // +-----------------+-----------------+--------------------------------+
-    // $ curl -X POST 'https://data.4tu.nl/v2/articles/search' -H 'Content-Type: application/json' --data '{"group": 28589}'
-
     let api_dataset_url    = "/v2/articles/search";
     let api_collection_url = "/v2/collections/search";
     let request_params     = parse_url_params();
@@ -428,13 +443,18 @@ function load_search_results() {
         }
     }
 
-    if ("filetypes" in request_params && typeof(request_params["filetypes"]) === "string" && request_params["filetypes"].length > 0) {
+    if (("filetypes" in request_params && typeof(request_params["filetypes"]) === "string" && request_params["filetypes"].length > 0) || ("filetypes_other" in request_params && typeof(request_params["filetypes_other"]) === "string" && request_params["filetypes_other"].length > 0)) {
         let temp_search_for = "";
         let items = request_params["filetypes"];
         let iterated = 0;
-        for (let scope of items.split(",")) {
-            iterated += 1;
-            temp_search_for += `:format: ${scope} OR `;
+        if (items && items.length > 0) {
+            for (let scope of items.split(",")) {
+                iterated += 1;
+                temp_search_for += `:format: ${scope} OR `;
+            }
+        }
+        if ("filetypes_other" in request_params && typeof(request_params["filetypes_other"]) === "string" && request_params["filetypes_other"].length > 0) {
+            temp_search_for += `:format: ${request_params["filetypes_other"]} OR `;
         }
         if (temp_search_for.endsWith(" OR ")) {
             temp_search_for = temp_search_for.slice(0, -4);
@@ -458,6 +478,18 @@ function load_search_results() {
         let new_date = new Date(year, 0, 1);
         let since_date = new_date.toISOString()
         request_params["published_since"] = `${since_date}`;
+    } else if ("publisheddate_other" in request_params && typeof(request_params["publisheddate_other"]) === "string" && request_params["publisheddate_other"].length > 0) {
+        let new_date = new Date(request_params["publisheddate_other"]);
+        let since_date = new_date.toISOString()
+        request_params["published_since"] = `${since_date}`;
+    }
+
+    if ("institutions_other" in request_params && typeof(request_params["institutions_other"]) === "string" && request_params["institutions_other"].length > 0) {
+        if (search_for) {
+            search_for += ` AND :organizations: ${request_params["institutions_other"]}`;
+        } else {
+            search_for += `:organizations: ${request_params["institutions_other"]}`;
+        }
     }
 
     if (search_for.length > 0) {
@@ -475,10 +507,10 @@ function load_search_results() {
     jQuery("#search-loader").show();
     jQuery("#search-error").hide();
 
-    // console.log(request_params);
+    console.log(request_params);
 
     jQuery.ajax({
-        url:         `/v2/articles/search`,
+        url:         target_api_url,
         type:        "POST",
         contentType: "application/json",
         accept:      "application/json",
@@ -490,13 +522,10 @@ function load_search_results() {
                 let error_message = `No search results...`;
                 jQuery("#search-error").html(error_message);
                 jQuery("#search-error").show();
+                return;
             }
 
-            // Remove the item if it doesn't have a timeline.
-            // Usually, embargoed datasets don't have timeline.
-            data = data.filter(function(item) {
-                return "timeline" in item;
-            });
+            console.log(data);
             render_search_results(data, request_params["page"]);
         } catch (error) {
             let error_message = `Failed to get search results` +
@@ -521,19 +550,21 @@ function render_search_results(data, page_number) {
     html_list_view += '<table class="corporate-identity-table">';
     html_list_view += '<thead><tr><th>Dataset</th><th>Posted On</th></tr></thead>';
 
-    // Sort data by s
-    data.sort(function(a, b) {
-        let keyA = new Date(a.timeline.posted);
-        let keyB = new Date(b.timeline.posted);
-        if (keyA < keyB) return -1;
-        if (keyA > keyB) return 1;
-        return 0;
-    });
-
     for (let item of data) {
+        // continue if it doesn't have a timeline.
+        // Usually, embargoed datasets don't have timeline.
+        if (!("timeline" in item)) {
+            continue;
+        }
+
         let uuid = item.uuid;
         let title = item.title;
-        let url_public_html = item.url_public_html;
+        let url_dataset = item.url_public_html;
+
+        // Collections don't have .url_public_html and .url returns json.
+        if (!url_dataset) {
+            url_dataset = "/collections/" + uuid;
+        }
 
         let preview_thumb = "/static/images/dataset-thumb.svg";
         if ("thumb" in item && typeof(item.thumb) === "string" && item.thumb.length > 0 && !(item.thumb.startsWith("https://ndownloader"))) {
@@ -551,7 +582,7 @@ function render_search_results(data, page_number) {
         }
 
         html_tile_view += `<div class="tile-item">`;
-        html_tile_view += `<a href="${url_public_html}">`;
+        html_tile_view += `<a href="${url_dataset}">`;
         html_tile_view += `<img class="tile-preview" src="${preview_thumb}" aria-hidden="true" alt="thumbnail for ${uuid}" />`;
         html_tile_view += `</a>`;
         html_tile_view += `<div class="tile-matches" id="article_${uuid}"></div>`;
@@ -565,7 +596,7 @@ function render_search_results(data, page_number) {
         html_tile_view += `</div>`;
 
         html_list_view += '<tr>';
-        html_list_view += `<td><a href="${url_public_html}">${title}</a></td><td style="text-align: center">${posted_date}</td>`;
+        html_list_view += `<td><a href="${url_dataset}">${title}</a></td><td style="text-align: center">${posted_date}</td>`;
         html_list_view += '</tr>';
     }
 
@@ -633,32 +664,77 @@ function load_search_preferences() {
 }
 
 function sort_search_results(sort_by) {
-    let search_results = jQuery(".corporate-identity-table");
+    //
+    // Sort the list view
+    //
+    let search_results_list = jQuery(".corporate-identity-table");
     // the first <tr> is the header row, so find the second <tr>
-    let items = search_results.find("tr:gt(0)").get();
+    let list_items = search_results_list.find("tr:gt(0)").get();
 
-    items.sort(function(a, b) {
-        // title: column 1, date: column 2
-        let keyA = null;
-        let keyB = null;
+    try {
+        list_items.sort(function(a, b) {
+            // title: column 1, date: column 2
+            let keyA = null;
+            let keyB = null;
 
-        if (sort_by === "date") {
-            keyA = jQuery(a).children("td").eq(1).text();
-            keyB = jQuery(b).children("td").eq(1).text();
-            keyA = new Date(keyA);
-            keyB = new Date(keyB);
-        } else if (sort_by === "title") {
-            keyA = jQuery(a).children("td").eq(0).text();
-            keyB = jQuery(b).children("td").eq(0).text();
-            keyA = keyA.toLowerCase();
-            keyB = keyB.toLowerCase();
-        }
-        if (keyA < keyB) return -1;
-        if (keyA > keyB) return 1;
-        return 0;
-    });
+            if (sort_by === "date") {
+                keyA = jQuery(a).children("td").eq(1).text();
+                keyB = jQuery(b).children("td").eq(1).text();
+                keyA = new Date(keyA);
+                keyB = new Date(keyB);
+            } else if (sort_by === "title") {
+                keyA = jQuery(a).children("td").eq(0).text();
+                keyB = jQuery(b).children("td").eq(0).text();
+                // Sometimes, the title has leading/trailing spaces.
+                keyA = keyA.trim().toLowerCase();
+                keyB = keyB.trim().toLowerCase();
+            }
+            if (keyA < keyB) return -1;
+            if (keyA > keyB) return 1;
+            return 0;
+        });
 
-    jQuery.each(items, function(i, row) {
-        search_results.append(row);
-    });
+        jQuery.each(list_items, function(i, row) {
+            search_results_list.append(row);
+        });
+    } catch (error) {
+        console.log(`Failed to sort the search results: ${sort_by} - ${error}`);
+    }
+
+    //
+    // Sort the tile view
+    //
+    let search_results_tiles = jQuery("#search-results-tile-view");
+    let tile_items = search_results_tiles.find(".tile-item").get();
+
+    try {
+        tile_items.sort(function(a, b) {
+            let keyA = null;
+            let keyB = null;
+
+            if (sort_by === "date") {
+                keyA = jQuery(a).children("div").eq(2).text();
+                keyB = jQuery(b).children("div").eq(2).text();
+                keyA = keyA.split(" ").pop();
+                keyB = keyB.split(" ").pop();
+                keyA = new Date(keyA);
+                keyB = new Date(keyB);
+            } else if (sort_by === "title") {
+                keyA = jQuery(a).children("div").eq(1).text();
+                keyB = jQuery(b).children("div").eq(1).text();
+                // Sometimes, the title has leading/trailing spaces.
+                keyA = keyA.trim().toLowerCase();
+                keyB = keyB.trim().toLowerCase();
+            }
+            if (keyA < keyB) return -1;
+            if (keyA > keyB) return 1;
+            return 0;
+        });
+
+        jQuery.each(tile_items, function(i, tile) {
+            search_results_tiles.append(tile);
+        });
+    } catch (error) {
+        console.log(`Failed to sort the search results: ${sort_by} - ${error}`);
+    }
 }
