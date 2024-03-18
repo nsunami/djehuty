@@ -441,6 +441,8 @@ function load_search_results() {
                 search_for = `${temp_search_for}`;
             }
         }
+    } else {
+        search_for = request_params["search"];
     }
 
     if (("filetypes" in request_params && typeof(request_params["filetypes"]) === "string" && request_params["filetypes"].length > 0) || ("filetypes_other" in request_params && typeof(request_params["filetypes_other"]) === "string" && request_params["filetypes_other"].length > 0)) {
