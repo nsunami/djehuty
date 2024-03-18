@@ -1671,6 +1671,25 @@ class SparqlInterface:
 
         return False
 
+    def item_collaborative_permissions (self, item_type, item_uuid,
+                                        collaborator_account_uuid):
+        """
+        Returns the permissions of a collaborator with ACCOUNT_UUID for dataset
+        or collection identified by ITEM_UUID.
+        """
+
+        query = self.__query_from_template ("item_collaborative_permissions", {
+            "item_type": item_type,
+            "item_uuid": item_uuid,
+            "account_uuid": collaborator_account_uuid
+        })
+
+        rows = self.__run_query (query)
+        if rows:
+            return rows[0]
+
+        return None
+
     def collaborators (self, dataset_uuid, account_uuid=None):
         "Get list of collaborators of a dataset"
         query = self.__query_from_template("collaborators", {
@@ -1733,7 +1752,8 @@ class SparqlInterface:
         self.cache.invalidate_by_prefix("datasets")
         return self.__run_logged_query (query)
 
-    def insert_private_link (self, item_uuid, account_uuid, whom=None, purpose=None, item_type=None,
+    def insert_private_link (self, item_uuid, account_uuid, whom=None,
+                             purpose=None, item_type=None, anonymize=False,
                              read_only=True, id_string=None,
                              is_active=True, expires_date=None):
         """Procedure to add a private link to the state graph."""
@@ -1754,6 +1774,7 @@ class SparqlInterface:
         rdf.add (graph, link_uri, rdf.DJHT["is_active"],    is_active)
         rdf.add (graph, link_uri, rdf.DJHT["expires_date"], expires_date, XSD.dateTime)
         rdf.add (graph, link_uri, rdf.DJHT["whom"], whom,  XSD.string)
+        rdf.add (graph, link_uri, rdf.DJHT["anonymize"], anonymize,  XSD.boolean)
         rdf.add (graph, link_uri, rdf.DJHT["purpose"], purpose,  XSD.string)
 
         if self.add_triples_from_graph (graph):
