@@ -2,6 +2,39 @@ const enable_subcategories = true;
 const page_size = 100;
 let filter_info = {};
 
+class PagePreferences {
+    constructor() {
+        this.storage = window.sessionStorage;
+    }
+    save(key, val) {
+        this.storage.setItem(key, JSON.stringify(val));
+    }
+    load(key) {
+        return JSON.parse(this.storage.getItem(key));
+    }
+    load_all() {
+        let keys = Object.keys(this.storage);
+        let all = {};
+        for (let key of keys) {
+            try {
+                all[key] = JSON.parse(this.storage.getItem(key));
+            } catch (error) {
+                all[key] = this.storage.getItem(key);
+            }
+        }
+        return all;
+    }
+    length() {
+        return this.storage.length;
+    }
+    remove(key) {
+        this.storage.removeItem(key);
+    }
+    clear() {
+        this.storage.clear();
+    }
+}
+
 function init_search_filter_info() {
     jQuery(`.search-filter-content`).each(function() {
         let filter_id = this.id;
@@ -81,6 +114,39 @@ function toggle_filter_input_text(id, flag) {
         jQuery(`#${id}`).val("");
         jQuery(`#${id}`).hide();
     }
+}
+
+function toggle_view_mode(mode) {
+    if (mode !== "list" && mode !== "tile") {
+        return;
+    }
+
+    if (mode === "tile") {
+        jQuery('#search-results-list-view').hide();
+        jQuery('#search-results-tile-view').show();
+        jQuery('#list-view-mode').css('color', 'darkgray');
+        jQuery('#tile-view-mode').css('color', '#f49120');
+    } else {
+        jQuery('#search-results-list-view').show();
+        jQuery('#search-results-tile-view').hide();
+        jQuery('#list-view-mode').css('color', '#f49120');
+        jQuery('#tile-view-mode').css('color', 'darkgray');
+    }
+
+    let page_preferences = new PagePreferences();
+    page_preferences.save("view_mode", mode);
+}
+
+function toggle_sort_by(sort_by) {
+    if (sort_by !== "title" && sort_by !== "date") {
+        return;
+    }
+
+    jQuery('#sort-by').val(sort_by);
+    sort_search_results(sort_by);
+
+    let page_preferences = new PagePreferences();
+    page_preferences.save("sort_by", sort_by);
 }
 
 function register_event_handlers() {
@@ -201,6 +267,18 @@ function register_event_handlers() {
         toggle_filter_apply_button(true);
     });
 
+    jQuery('#tile-view-mode').click(function() {
+        toggle_view_mode("tile");
+    });
+
+    jQuery('#list-view-mode').click(function() {
+        toggle_view_mode("list");
+    });
+
+    jQuery('#sort-by').change(function() {
+        let sort_by = jQuery('#sort-by').val();
+        toggle_sort_by(sort_by);
+    });
 }
 
 function validate_publisheddate_other() {
@@ -329,7 +407,7 @@ function load_search_results() {
         request_params["item_type"] = request_params["datatypes"];
     }
 
-    let search_for = null;
+    let search_for = "";
     if ("searchscope" in request_params && typeof(request_params["searchscope"]) === "string" && request_params["searchscope"].length > 0) {
         let temp_search_for = "";
         let items = request_params["searchscope"];
@@ -382,7 +460,7 @@ function load_search_results() {
         request_params["published_since"] = `${since_date}`;
     }
 
-    if (search_for) {
+    if (search_for.length > 0) {
         request_params["search_for"] = search_for;
     } else {
         request_params["search_for"] = request_params["search"];
@@ -397,7 +475,7 @@ function load_search_results() {
     jQuery("#search-loader").show();
     jQuery("#search-error").hide();
 
-    console.log(request_params);
+    // console.log(request_params);
 
     jQuery.ajax({
         url:         `/v2/articles/search`,
@@ -413,6 +491,12 @@ function load_search_results() {
                 jQuery("#search-error").html(error_message);
                 jQuery("#search-error").show();
             }
+
+            // Remove the item if it doesn't have a timeline.
+            // Usually, embargoed datasets don't have timeline.
+            data = data.filter(function(item) {
+                return "timeline" in item;
+            });
             render_search_results(data, request_params["page"]);
         } catch (error) {
             let error_message = `Failed to get search results` +
@@ -432,12 +516,24 @@ function load_search_results() {
 }
 
 function render_search_results(data, page_number) {
-    let html = "";
+    let html_tile_view = "";
+    let html_list_view = "";
+    html_list_view += '<table class="corporate-identity-table">';
+    html_list_view += '<thead><tr><th>Dataset</th><th>Posted On</th></tr></thead>';
+
+    // Sort data by s
+    data.sort(function(a, b) {
+        let keyA = new Date(a.timeline.posted);
+        let keyB = new Date(b.timeline.posted);
+        if (keyA < keyB) return -1;
+        if (keyA > keyB) return 1;
+        return 0;
+    });
+
     for (let item of data) {
-        if (!("timeline" in item)) {
-            // Usually, embargoed datasets don't have timeline.
-            continue;
-        }
+        let uuid = item.uuid;
+        let title = item.title;
+        let url_public_html = item.url_public_html;
 
         let preview_thumb = "/static/images/dataset-thumb.svg";
         if ("thumb" in item && typeof(item.thumb) === "string" && item.thumb.length > 0 && !(item.thumb.startsWith("https://ndownloader"))) {
@@ -454,23 +550,33 @@ function render_search_results(data, page_number) {
             revision = item.timeline.revision;
         }
 
-        html += `<div class="tile-item">`;
-        html += `<a href="${item.url_public_html}">`;
-        html += `<img class="tile-preview" src="${preview_thumb}" aria-hidden="true" alt="thumbnail for ${item.uuid}" />`;
-        html += `</a>`;
-        html += `<div class="tile-matches" id="article_${item.uuid}"></div>`;
-        html += `<div class="tile-title"><a href="/datasets/${item.uuid}">${item.title}</a></div>`;
+        html_tile_view += `<div class="tile-item">`;
+        html_tile_view += `<a href="${url_public_html}">`;
+        html_tile_view += `<img class="tile-preview" src="${preview_thumb}" aria-hidden="true" alt="thumbnail for ${uuid}" />`;
+        html_tile_view += `</a>`;
+        html_tile_view += `<div class="tile-matches" id="article_${uuid}"></div>`;
+        html_tile_view += `<div class="tile-title"><a href="/datasets/${uuid}">${title}</a></div>`;
 
         if (revision) {
-            html += `<div class="tile-revision">Revision ${revision}</div>`;
+            html_tile_view += `<div class="tile-revision">Revision ${revision}</div>`;
         }
-        html += `<div class="tile-date">Posted on ${posted_date}</div>`;
-        html += `<div class="tile-authors"> </div>`;
-        html += `</div>`;
+        html_tile_view += `<div class="tile-date">Posted on ${posted_date}</div>`;
+        html_tile_view += `<div class="tile-authors"> </div>`;
+        html_tile_view += `</div>`;
+
+        html_list_view += '<tr>';
+        html_list_view += `<td><a href="${url_public_html}">${title}</a></td><td style="text-align: center">${posted_date}</td>`;
+        html_list_view += '</tr>';
     }
 
-    html += get_pager_html(data, page_number);
-    jQuery(".search-results").html(html);
+    html_list_view += `</tbody></table>`;
+    html_pager = get_pager_html(data, page_number);
+    jQuery("#search-results-tile-view").html(html_tile_view);
+    jQuery("#search-results-list-view").html(html_list_view);
+    jQuery(".search-results-pager").html(html_pager);
+
+    // Sort the search results by the selected sort_by.
+    load_search_preferences()
 }
 
 function get_pager_html(data, current_page=1) {
@@ -493,7 +599,7 @@ function get_pager_html(data, current_page=1) {
 
     let new_url_link = new URL(window.location.href);
     new_url_link.searchParams.delete('page');
-    html += `<div class="search-results-pager">`;
+    html += "";
     if (prev_page) {
         new_url_link.searchParams.append('page', prev_page);
         html += `<div><a href="${new_url_link.href}" class="pager-prev">Previous</a></div>`;
@@ -507,7 +613,52 @@ function get_pager_html(data, current_page=1) {
     } else {
         html += `<div></div>`;
     }
-    html += `</div>`;
-
     return html;
+}
+
+function load_search_preferences() {
+    let page_preferences = new PagePreferences();
+    let all_preferences = page_preferences.load_all();
+    if ("view_mode" in all_preferences) {
+        toggle_view_mode(all_preferences["view_mode"]);
+    } else {
+        toggle_view_mode("tile");
+    }
+
+    if ("sort_by" in all_preferences) {
+        toggle_sort_by(all_preferences["sort_by"]);
+    } else {
+        toggle_sort_by("date");
+    }
+}
+
+function sort_search_results(sort_by) {
+    let search_results = jQuery(".corporate-identity-table");
+    // the first <tr> is the header row, so find the second <tr>
+    let items = search_results.find("tr:gt(0)").get();
+
+    items.sort(function(a, b) {
+        // title: column 1, date: column 2
+        let keyA = null;
+        let keyB = null;
+
+        if (sort_by === "date") {
+            keyA = jQuery(a).children("td").eq(1).text();
+            keyB = jQuery(b).children("td").eq(1).text();
+            keyA = new Date(keyA);
+            keyB = new Date(keyB);
+        } else if (sort_by === "title") {
+            keyA = jQuery(a).children("td").eq(0).text();
+            keyB = jQuery(b).children("td").eq(0).text();
+            keyA = keyA.toLowerCase();
+            keyB = keyB.toLowerCase();
+        }
+        if (keyA < keyB) return -1;
+        if (keyA > keyB) return 1;
+        return 0;
+    });
+
+    jQuery.each(items, function(i, row) {
+        search_results.append(row);
+    });
 }

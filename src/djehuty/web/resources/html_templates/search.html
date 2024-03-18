@@ -195,6 +195,8 @@
     //    flex: auto;
     //}
 }
+.corporate-identity-table { width: auto !important; max-width: auto !important; }
+.corporate-identity-table tbody tr td:nth-child(1) { max-width: 0; }
 .search-results-pager div {
     padding: 0.5em 0.5em 0.5em 0.5em;
 }
@@ -213,6 +215,7 @@
         toggle_filter_categories_showmore(true);
         register_event_handlers();
         load_search_filters_from_url();
+        load_search_preferences();
         load_search_results();
     });
 </script>
@@ -338,7 +341,7 @@
             <div style="text-align: left;">
                 <b>Sort By</b>
                 <div style="justify-content: space-between; padding: 5pt 0pt 5pt 0pt;">
-                    <select id="sort_by" name="sort_by" style="padding: 0.5em 3.2em 0.5em 0.7em; border-radius: 0.5em; border: 1px solid darkgrey; width: 10em; height: 2.5em;">
+                    <select id="sort-by" name="sort-by" style="padding: 0.5em 3.2em 0.5em 0.7em; border-radius: 0.5em; border: 1px solid darkgrey; width: 10em; height: 2.5em;">
                         <option value="date" selected>Date</option>
                         <option value="title">Title</option>
                     </select>
@@ -350,8 +353,8 @@
         <div style="float: right; text-align: right; margin-right: 1em">
             <b>View</b>
             <div style="justify-content: space-between; padding: 5pt 0pt 5pt 0pt;">
-                <a href="#"><span class="fas fa-tile fa-lg" id="tile_view_mode" style="color: #f49120"><span class="hidden">Tile View</span></span></a>
-                <a href="#"><span class="fas fa-list fa-lg" id="list_view_mode" style="color: darkgray"><span class="hidden">List View</span></span></a>
+                <a href="#"><span class="fas fa-tile fa-lg" id="tile-view-mode" style="color: #f49120"><span class="hidden">Tile View</span></span></a>
+                <a href="#"><span class="fas fa-list fa-lg disabled" id="list-view-mode" style="color: darkgray"><span class="hidden">List View</span></span></a>
             </div>
         </div>
 
@@ -361,6 +364,9 @@
         <!-- Search results -->
         <div class="search-results" id="search-results">
             <div class="search-results-box" id="search-results-box">
+                <div id="search-results-tile-view"></div>
+                <div id="search-results-list-view" style="display: none"></div>
+                <div class="search-results-pager"></div>
             </div>
         </div>
         <!-- End of Search results -->
