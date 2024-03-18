@@ -353,7 +353,6 @@ function load_search_filters_from_url() {
             }
 
             if (filter_name !== "search" && filter_name !== "page") {
-                console.log(`filter_name: ${filter_name}, values: ${values}`);
                 if (is_other) {
                     jQuery(`#search-box-wrapper form`).append(`<input type="hidden" name="${filter_name}_other" value="${values}">`);
                 } else {
@@ -442,7 +441,10 @@ function load_search_results() {
             }
         }
     } else {
-        search_for = request_params["search"];
+        // If searchscope is not selected, search in title, description, and tags.
+        if ("search" in request_params && typeof(request_params["search"]) === "string" && request_params["search"].length > 0) {
+            search_for = `( :title: ${request_params["search"]} OR :description: ${request_params["search"]} OR :tag: ${request_params["search"]} )`;
+        }
     }
 
     if (("filetypes" in request_params && typeof(request_params["filetypes"]) === "string" && request_params["filetypes"].length > 0) || ("filetypes_other" in request_params && typeof(request_params["filetypes_other"]) === "string" && request_params["filetypes_other"].length > 0)) {
@@ -497,7 +499,9 @@ function load_search_results() {
     if (search_for.length > 0) {
         request_params["search_for"] = search_for;
     } else {
-        request_params["search_for"] = request_params["search"];
+        if ("search" in request_params && typeof(request_params["search"]) === "string" && request_params["search"].length > 0) {
+            request_params["search_for"] = request_params["search"];
+        }
     }
 
     request_params["group"] = request_params["institutions"];
@@ -508,8 +512,6 @@ function load_search_results() {
 
     jQuery("#search-loader").show();
     jQuery("#search-error").hide();
-
-    console.log(request_params);
 
     jQuery.ajax({
         url:         target_api_url,
@@ -527,7 +529,6 @@ function load_search_results() {
                 return;
             }
 
-            console.log(data);
             render_search_results(data, request_params["page"]);
         } catch (error) {
             let error_message = `Failed to get search results` +
