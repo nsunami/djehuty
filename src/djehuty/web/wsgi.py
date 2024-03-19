@@ -961,8 +961,6 @@ class ApiServer:
         record["groups"]  = [record["group"]] if record["group"] is not None else None
         del record["group"]
 
-        self.log.info("Dataset API parameters: %s", record)
-
         return record
 
     def __pretty_print_dates_for_item (self, item):
@@ -8028,7 +8026,6 @@ class ApiServer:
                     search_dict[field] = search_term
                 search_tokens[idx] = search_dict
 
-        self.log.info("Search tokens: %s", search_tokens)
         return search_tokens
 
     def add_names_to_authors (self, authors):
