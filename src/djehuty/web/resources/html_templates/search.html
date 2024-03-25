@@ -183,7 +183,6 @@
 }
 .filter-button-reset:hover { background: #cccccc; color: #000000; }
 .search-results {
-    padding-top: 1em;
     clear: right;
 }
 .search-results-pager {
@@ -342,7 +341,7 @@
     <div class="search-column right">
 
         <!-- Sort by select box -->
-        <div style="float: left;">
+        <div style="float: left; height: 4.5em">
             <div style="text-align: left;">
                 <b>Sort By</b>
                 <div style="justify-content: space-between; padding: 5pt 0pt 5pt 0pt;">
@@ -354,8 +353,15 @@
             </div>
         </div>
 
+        <!-- Result count -->
+        <div style="float: left; height: 4.5em; padding-left: 2em">
+            <div style="text-align: left;">
+                <div style="padding-top: 2em"><span id="search-results-count"></span></div>
+            </div>
+        </div>
+
         <!-- View mode -->
-        <div style="float: right; text-align: right; margin-right: 1em">
+        <div style="float: right; text-align: right; margin-right: 1em; height: 4.5em">
             <b>View</b>
             <div style="justify-content: space-between; padding: 5pt 0pt 5pt 0pt;">
                 <span class="fas fa-tile fa-lg" id="tile-view-mode" style="color: #f49120; cursor: pointer;"><span class="hidden">Tile View</span></span>

@@ -618,8 +618,28 @@ function render_search_results(data, page_number) {
     jQuery("#search-results-list-view").html(html_list_view);
     jQuery(".search-results-pager").html(html_pager);
 
+    update_search_results_count(data, page_number);
     // Sort the search results by the selected sort_by.
     load_search_preferences()
+}
+
+function update_search_results_count(data, current_page=1) {
+    let html = "";
+    if (data.length < page_size) {
+        if (current_page === 1) {
+            if (data.length === 1) {
+                html = "<b>1</b> result found.";
+            } else {
+                html = `<b>${data.length}</b> results found.`;
+            }
+        } else {
+            html = `Over <b>${page_size}</b> results found.`;
+        }
+    } else {
+        html = `Over <b>${page_size}</b> results found.`;
+    }
+
+    jQuery("#search-results-count").html(html);
 }
 
 function get_pager_html(data, current_page=1) {
