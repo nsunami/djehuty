@@ -119,11 +119,10 @@ class ApiServer:
             ## ----------------------------------------------------------------
             ## UI
             ## ----------------------------------------------------------------
-            # The / used to redirect to /portal, but here we reversed it.
-            R("/",                                                               self.ui_portal),
-            R("/portal",                                                         self.ui_home),
+            R("/",                                                               self.ui_home),
+            R("/portal",                                                         self.ui_redirect_to_home),
+            R("/browse",                                                         self.ui_redirect_to_home),
             R("/robots.txt",                                                     self.robots_txt),
-            R("/browse",                                                         self.ui_home),
             R("/login",                                                          self.ui_login),
             R("/account/home",                                                   self.ui_account_home),
             R("/logout",                                                         self.ui_logout),
@@ -156,9 +155,12 @@ class ApiServer:
             R("/review/assign-to-me/<dataset_id>",                               self.ui_review_assign_to_me),
             R("/review/unassign/<dataset_id>",                                   self.ui_review_unassign),
             R("/review/published/<dataset_id>",                                  self.ui_review_published),
+            R("/admin/approve-quota-request/<quota_request_uuid>",               self.ui_admin_approve_quota_request),
             R("/admin/dashboard",                                                self.ui_admin_dashboard),
+            R("/admin/deny-quota-request/<quota_request_uuid>",                  self.ui_admin_deny_quota_request),
             R("/admin/users",                                                    self.ui_admin_users),
             R("/admin/exploratory",                                              self.ui_admin_exploratory),
+            R("/admin/quota-requests",                                           self.ui_admin_quota_requests),
             R("/admin/sparql",                                                   self.ui_admin_sparql),
             R("/admin/reports",                                                  self.ui_admin_reports),
             R("/admin/reports/restricted_datasets",                              self.ui_admin_reports_restricted_datasets),
@@ -500,6 +502,7 @@ class ApiServer:
             "is_logged_in":    account is not None,
             "is_reviewing":    self.db.may_review (impersonator_token),
             "may_review":      self.db.may_review (token, account),
+            "may_review_quotas": self.db.may_review_quotas (token, account),
             "may_administer":  self.db.may_administer (token, account),
             "may_query":       self.db.may_query (token, account),
             "may_impersonate":  self.db.may_impersonate (token, account),
@@ -1397,7 +1400,7 @@ class ApiServer:
     ## API CALLS
     ## ------------------------------------------------------------------------
 
-    def ui_home (self, request):
+    def ui_redirect_to_home (self, request):
         """Implements /."""
         if self.accepts_html (request):
             return redirect ("/", code=301)
@@ -2680,6 +2683,42 @@ class ApiServer:
         return self.__render_template (request, "review/published.html",
                                        container_uuid=dataset["container_uuid"])
 
+    def __process_quota_request (self, request, quota_request_uuid, status):
+        token = self.token_from_cookie (request)
+        if not self.db.may_review_quotas (token):
+            return self.error_403 (request)
+
+        if not validator.is_valid_uuid (quota_request_uuid):
+            return self.error_400 (request, "Invalid quota request UUID.",
+                                   "InvalidQuotaRequestUUIError")
+
+        if self.db.update_quota_request (quota_request_uuid, status = status):
+            return redirect ("/admin/quota-requests", code=302)
+
+        return self.error_500 ()
+
+    def ui_admin_approve_quota_request (self, request, quota_request_uuid):
+        """Implements /admin/approve-quota-request/<id>."""
+        return self.__process_quota_request (request, quota_request_uuid, "approved")
+
+    def ui_admin_deny_quota_request (self, request, quota_request_uuid):
+        """Implements /admin/approve-quota-request/<id>."""
+        return self.__process_quota_request (request, quota_request_uuid, "denied")
+
+    def ui_admin_quota_requests (self, request):
+        """Implements /admin/quota-requests."""
+
+        if not self.accepts_html (request):
+            return self.error_406 ("text/html")
+
+        token = self.token_from_cookie (request)
+        if not self.db.may_review_quotas (token):
+            return self.error_403 (request)
+
+        quota_requests = self.db.quota_requests (status="unresolved")
+        return self.__render_template (request, "admin/quota_requests.html",
+                                       quota_requests = quota_requests)
+
     def ui_admin_dashboard (self, request):
         """Implements /admin/dashboard."""
         if not self.accepts_html (request):
@@ -2890,7 +2929,7 @@ class ApiServer:
 
         return self.error_405 (["GET", "POST"])
 
-    def ui_portal (self, request):
+    def ui_home (self, request):
         """Implements /portal."""
         if not self.accepts_html (request):
             return self.error_406 ("text/html")
@@ -7426,7 +7465,6 @@ class ApiServer:
                     biography             = validator.string_value  (record, "biography", 0, 32768),
                     institution_user_id   = validator.integer_value (record, "institution_user_id"),
                     institution_id        = validator.integer_value (record, "institution_id"),
-                    pending_quota_request = validator.integer_value (record, "pending_quota_request"),
                     maximum_file_size     = validator.integer_value (record, "maximum_file_size"),
                     modified_date         = validator.string_value  (record, "modified_date", 0, 32),
                     categories            = categories):
@@ -7458,14 +7496,25 @@ class ApiServer:
 
         try:
             parameters = request.get_json()
-            new_quota  = validator.integer_value (parameters, "new-quota", required=True)
+            quota_gb   = validator.integer_value (parameters, "new-quota", required=True)
             reason     = validator.string_value (parameters, "reason", 0, 10000, required=True)
+
+            if quota_gb < 1:
+                return self.error_400 (request,
+                    "Requested quota must be at least 1 gigabyte.",
+                    "QuotaRequestSizeTooSmall")
+
+            new_quota = quota_gb * 1000000000
+            quota_uuid = self.db.insert_quota_request (account_uuid, new_quota, reason)
+            if quota_uuid is None:
+                return self.error_500 ()
+
             account    = self.db.account_by_uuid (account_uuid)
             self.__send_email_to_quota_reviewers (
                 f"Quota request for {account_uuid}",
                 "quota_request",
                 email     = account['email'],
-                new_quota = new_quota,
+                new_quota = quota_gb,
                 reason    = reason)
 
             return self.respond_204 ()

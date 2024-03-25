@@ -1269,9 +1269,64 @@ class SparqlInterface:
 
         return None, None
 
+    def insert_quota_request (self, account_uuid, requested_size, reason):
+        """Procedure to create a quota request."""
+
+        if account_uuid is None or requested_size is None:
+            return None
+
+        graph        = Graph()
+        uri          = rdf.unique_node ("quota-request")
+        account_uri  = rdf.uuid_to_uri (account_uuid, "account")
+        current_time = datetime.strftime (datetime.now(), "%Y-%m-%dT%H:%M:%S")
+
+        graph.add ((uri, RDF.type,      rdf.DJHT["QuotaRequest"]))
+        rdf.add (graph, uri, rdf.DJHT["account"], account_uri, "uri")
+        rdf.add (graph, uri, rdf.DJHT["requested_size"], requested_size, XSD.integer)
+        rdf.add (graph, uri, rdf.DJHT["reason"], reason, XSD.string)
+        rdf.add (graph, uri, rdf.DJHT["created_date"], current_time, XSD.dateTime)
+        rdf.add (graph, uri, rdf.DJHT["status"], rdf.DJHT["QuotaRequestUnresolved"], "uri")
+
+        if self.add_triples_from_graph (graph):
+            return rdf.uri_to_uuid (uri)
+
+        return None
+
+    def update_quota_request (self, quota_request_uuid, requested_size=None,
+                              reason=None, status=None):
+        """Procedure to update a quota request."""
+
+        status_uri = None
+        if status is not None:
+            status_uri = rdf.DJHT[f"QuotaRequest{status.capitalize()}"]
+
+        query = self.__query_from_template ("update_quota_request", {
+            "quota_request_uuid": quota_request_uuid,
+            "requested_size": requested_size,
+            "reason": reason,
+            "status": None if status_uri is None else rdf.urify_value (status_uri),
+            "assign_to_account": status == "approved"
+        })
+
+        if self.enable_query_audit_log:
+            self.__log_query (query, "Query Audit Log")
+
+        self.cache.invalidate_by_prefix ("accounts")
+        return self.__run_query (query)
+
+    def quota_requests (self, status=None):
+        """Procedure to return a list of quota requests."""
+
+        status_uri = None
+        if status is not None:
+            status_uri = rdf.urify_value (rdf.DJHT[f"QuotaRequest{status.capitalize()}"])
+
+        query = self.__query_from_template ("quota_requests", { "status": status_uri })
+        return self.__run_query (query)
+
     def update_account (self, account_uuid, active=None, email=None, job_title=None,
                         first_name=None, last_name=None, institution_user_id=None,
-                        institution_id=None, pending_quota_request=None,
+                        institution_id=None,
                         maximum_file_size=None, modified_date=None, created_date=None,
                         location=None, biography=None, categories=None, twitter=None,
                         linkedin=None, website=None, profile_image=None):
@@ -1299,7 +1354,6 @@ class SparqlInterface:
             "biography":             rdf.escape_string_value (biography),
             "institution_user_id":   institution_user_id,
             "institution_id":        institution_id,
-            "pending_quota_request": pending_quota_request,
             "maximum_file_size":     maximum_file_size,
             "profile_image":         profile_image,
             "modified_date":         modified_date,
@@ -2721,11 +2775,14 @@ class SparqlInterface:
 
         return None
 
-    def account_quota (self, email, domain):
+    def account_quota (self, email, domain, account):
         """Return the account's quota in bytes."""
 
         account_quota = self.account_quotas.get (email)
         group_quota   = self.group_quotas.get (domain)
+
+        if "quota" in account:
+            return account["quota"]
 
         if account_quota:
             return account_quota
@@ -2745,7 +2802,7 @@ class SparqlInterface:
                 privileges = self.privileges[email]
 
             domain     = conv.value_or (account, "domain", "")
-            quota      = self.account_quota (email, domain)
+            quota      = self.account_quota (email, domain, account)
             account    = { **account, **privileges, "quota": quota }
         except (TypeError, KeyError):
             pass
