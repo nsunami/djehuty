@@ -140,14 +140,16 @@ class SparqlInterface:
 
     def __normalize_orcid (self, orcid):
         """Procedure to make storing ORCID identifiers consistent."""
-        # Don't store empty ORCID identifiers.
-        if orcid == "":
-            orcid = None
-        # Strip the URI prefix from ORCID identifiers.
-        elif not isinstance(orcid, str):
+        # Don't process invalid entries
+        if not isinstance(orcid, str):
             return None
-        elif orcid.startswith ("https://orcid.org/"):
-            orcid = orcid[18:]
+        # Don't store empty ORCID identifiers.
+        orcid = orcid.strip()
+        if orcid == "":
+            return None
+        # Strip the URI prefix from ORCID identifiers.
+        if orcid.startswith ("https://orcid.org/"):
+            return orcid[18:]
 
         return orcid
 
@@ -362,7 +364,6 @@ class SparqlInterface:
 
         return filters
 
-
     def datasets (self, account_uuid=None, categories=None, collection_uri=None,
                   container_uuid=None, dataset_id=None, dataset_uuid=None, doi=None,
                   exclude_ids=None, groups=None, handle=None, institution=None,
@@ -436,6 +437,11 @@ class SparqlInterface:
             cache_prefix = f"datasets_{account_uuid}" if account_uuid is not None else "datasets"
             return self.__run_query (query, query, cache_prefix)
 
+        return self.__run_query (query)
+
+    def datasets_missing_dois (self):
+        """Procedure to retrieve datasets where a DOI registration went wrong."""
+        query = self.__query_from_template ("datasets_missing_dois")
         return self.__run_query (query)
 
     def repository_statistics (self):
@@ -1308,11 +1314,8 @@ class SparqlInterface:
             "assign_to_account": status == "approved"
         })
 
-        if self.enable_query_audit_log:
-            self.__log_query (query, "Query Audit Log")
-
         self.cache.invalidate_by_prefix ("accounts")
-        return self.__run_query (query)
+        return self.__run_logged_query (query)
 
     def quota_requests (self, status=None):
         """Procedure to return a list of quota requests."""
@@ -2342,6 +2345,15 @@ class SparqlInterface:
         self.cache.invalidate_by_prefix (f"datasets_{account_uuid}")
         self.cache.invalidate_by_prefix ("datasets")
         return self.__run_query(query)
+
+    def dataset_update_doi_after_publishing (self, dataset_uuid, doi):
+        """Procedure to update a DOI after it has been published."""
+
+        query = self.__query_from_template ("update_doi_after_publishing", {
+            "dataset_uuid": dataset_uuid,
+            "doi": rdf.escape_string_value (doi)
+        })
+        return self.__run_logged_query (query)
 
     def insert_collection (self, title,
                            account_uuid,

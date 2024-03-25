@@ -129,6 +129,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/sparql_templates/dataset_storage_used.sparql        \
     djehuty/web/resources/sparql_templates/dataset_versions.sparql            \
     djehuty/web/resources/sparql_templates/datasets.sparql                    \
+    djehuty/web/resources/sparql_templates/datasets_missing_dois.sparql       \
     djehuty/web/resources/sparql_templates/decline_draft_dataset.sparql       \
     djehuty/web/resources/sparql_templates/delete_account_property.sparql     \
     djehuty/web/resources/sparql_templates/delete_associations.sparql         \
@@ -176,6 +177,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/sparql_templates/update_collection.sparql           \
     djehuty/web/resources/sparql_templates/update_dataset.sparql              \
     djehuty/web/resources/sparql_templates/update_dataset_thumb.sparql        \
+    djehuty/web/resources/sparql_templates/update_doi_after_publishing.sparql \
     djehuty/web/resources/sparql_templates/update_file.sparql                 \
     djehuty/web/resources/sparql_templates/update_git_uuid.sparql             \
     djehuty/web/resources/sparql_templates/update_orcid_for_account.sparql    \
