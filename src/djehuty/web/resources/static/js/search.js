@@ -1,5 +1,6 @@
 const enable_subcategories = true;
 const page_size = 100;
+const max_parameter_length = 255;
 let filter_info = {};
 
 class PagePreferences {
@@ -256,12 +257,21 @@ function register_event_handlers() {
                 new_url += `${filter_name}=${values.join(",")}&`;
             }
             if ("other_value" in filter_info[filter_name]) {
-                new_url += `${filter_name}_other=${filter_info[filter_name]["other_value"]}&`;
+                let other_value = filter_info[filter_name]["other_value"];
+                other_value = trim_single_word(other_value);
+                if (other_value && other_value.length > max_parameter_length) {
+                    other_value = other_value.substring(0, max_parameter_length);
+                }
+                new_url += `${filter_name}_other=${other_value}&`;
             }
         }
 
         let search_for = jQuery("#search-box").val();
         if (search_for && search_for.length > 0) {
+            if (search_for.length > max_parameter_length) {
+                search_for = search_for.substring(0, max_parameter_length);
+                jQuery("#search-box").val(search_for);
+            }
             new_url += `search=${search_for}&`;
         }
 
@@ -357,6 +367,12 @@ function load_search_filters_from_url() {
                     jQuery(`#search-box-wrapper form`).append(`<input type="hidden" name="${filter_name}_other" value="${values}">`);
                 } else {
                     jQuery(`#search-box-wrapper form`).append(`<input type="hidden" name="${filter_name}" value="${values}">`);
+                }
+            } else if (filter_name === "search") {
+                let search_for = jQuery("#search-box").val();
+                if (search_for && search_for.length > 0 && search_for.length > max_parameter_length) {
+                    search_for = search_for.substring(0, max_parameter_length);
+                    jQuery("#search-box").val(search_for);
                 }
             }
 
@@ -467,7 +483,9 @@ function load_search_results() {
             }
         }
         if ("filetypes_other" in request_params && typeof(request_params["filetypes_other"]) === "string" && request_params["filetypes_other"].length > 0) {
-            temp_search_for += `:format: ${request_params["filetypes_other"]} OR `;
+            let filetypes_other = request_params["filetypes_other"];
+            filetypes_other = trim_single_word(filetypes_other);
+            temp_search_for += `:format: ${filetypes_other} OR `;
         }
         if (temp_search_for.endsWith(" OR ")) {
             temp_search_for = temp_search_for.slice(0, -4);
@@ -498,10 +516,12 @@ function load_search_results() {
     }
 
     if ("institutions_other" in request_params && typeof(request_params["institutions_other"]) === "string" && request_params["institutions_other"].length > 0) {
+        let institutions_other = request_params["institutions_other"];
+        institutions_other = trim_single_word(institutions_other);
         if (search_for) {
-            search_for += ` AND :organizations: ${request_params["institutions_other"]}`;
+            search_for += ` AND :organizations: ${institutions_other}`;
         } else {
-            search_for += `:organizations: ${request_params["institutions_other"]}`;
+            search_for += `:organizations: ${institutions_other}`;
         }
     }
 
@@ -771,4 +791,8 @@ function sort_search_results(sort_by) {
     } catch (error) {
         console.log(`Failed to sort the search results: ${sort_by} - ${error}`);
     }
+}
+
+function trim_single_word(word) {
+    return word.replace(/\s+.*$/g, '');
 }
