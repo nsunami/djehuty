@@ -341,6 +341,8 @@ class SparqlInterface:
             # Post-construction heuristical query fixing
             # It's undocumented because it needs to be replaced.
             filters = filters.replace("FILTER ( || ", "FILTER (")
+            filters = filters.replace(")CONTAINS", ") || CONTAINS")
+            filters = filters.replace(")\nCONTAINS", ") || CONTAINS")
             filters = filters.replace(")(", ") || (")
             filters = filters.replace(")  )", ")")
         else:
