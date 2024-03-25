@@ -647,14 +647,16 @@ function get_pager_html(data, current_page=1) {
         new_url_link.searchParams.append('page', prev_page);
         html += `<div><a href="${new_url_link.href}" class="pager-prev">Previous</a></div>`;
     } else {
-        html += `<div></div>`;
+        html += `<div style="color: lightgrey">Prev</div>`;
     }
+
+    html += `<div class="pager-cur">Page ${current_page}</div>`;
 
     if (next_page) {
         new_url_link.searchParams.append('page', next_page);
         html += `<div><a href="${new_url_link.href}" class="pager-next">Next</a></div>`;
     } else {
-        html += `<div></div>`;
+        html += `<div style="color: lightgrey">Next</div>`;
     }
     return html;
 }
