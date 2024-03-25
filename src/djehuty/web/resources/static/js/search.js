@@ -423,6 +423,15 @@ function load_search_results() {
 
     let search_for = "";
     if ("searchscope" in request_params && typeof(request_params["searchscope"]) === "string" && request_params["searchscope"].length > 0) {
+
+        // If there's no search terms, show an error message.
+        if (!("search" in request_params) || typeof(request_params["search"]) === "string" && request_params["search"].length == 0) {
+            let error_message = `Search Scope requires search terms(s).`;
+            jQuery("#search-error").html(error_message);
+            jQuery("#search-error").show();
+            return;
+        }
+
         let temp_search_for = "";
         let items = request_params["searchscope"];
         let iterated = 0;
