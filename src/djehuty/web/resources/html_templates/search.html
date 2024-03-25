@@ -1,6 +1,7 @@
 {% extends "layout.html" %}
 {% block headers %}
 <script src="/static/js/jquery-3.6.0.min.js"></script>
+<script src="/static/js/jquery.ui.min.js"></script>
 <script src="/static/js/search.js"></script>
 <style>
 .tile-item {
@@ -214,7 +215,16 @@
 {% block body %}
 
 <script>
+    jQuery('head').append('<link rel="stylesheet" href="/static/css/jquery.ui.min.css" type="text/css" />');
     jQuery(document).ready(function() {
+        jQuery( function() { $( "#textinput_publisheddate_other" ).datepicker(
+            {
+                changeMonth: true,
+                changeYear: true,
+                dateFormat: "yy-mm-dd",
+                yearRange: "c-20:c"
+            }
+        ); } );
         init_search_filter_info();
         toggle_filter_categories_showmore(true);
         register_event_handlers();
@@ -301,6 +311,7 @@
                     <li> <label for="checkbox_publisheddate_2"><input type="checkbox" id="checkbox_publisheddate_2" name="checkbox_publisheddate_2" value="2">Past 2 years</label></li>
                     <li> <label for="checkbox_publisheddate_3"><input type="checkbox" id="checkbox_publisheddate_3" name="checkbox_publisheddate_3" value="3">Past 3 years</label></li>
                     <li> <label for="checkbox_publisheddate_other"><input type="checkbox" id="checkbox_publisheddate_other" name="checkbox_publisheddate_other" value="other">Other</label></li>
+                    <!-- <li> <input type="text" style="display: none" id="textinput_publisheddate_other" name="textinput-publisheddate_other" placeholder="YYYY-MM-DD" value=""></li> -->
                     <li> <input type="text" style="display: none" id="textinput_publisheddate_other" name="textinput-publisheddate_other" placeholder="YYYY-MM-DD" value=""></li>
                     <li id="textinput-publisheddate-other-error"></li>
                 </ul>
