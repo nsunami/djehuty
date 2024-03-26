@@ -44,6 +44,7 @@ class SparqlInterface:
         self.group_quotas   = {}
         self.default_quota  = 5000000000
         self.store          = None
+        self.disable_collaboration = True
 
     def setup_sparql_endpoint (self):
         """Procedure to be called after setting the 'endpoint' members."""
@@ -155,7 +156,10 @@ class SparqlInterface:
 
     def __query_from_template (self, name, args=None):
         template   = self.jinja.get_template (f"{name}.sparql")
-        parameters = { "state_graph": self.state_graph }
+        parameters = {
+            "state_graph":           self.state_graph,
+            "disable_collaboration": self.disable_collaboration
+        }
         if args is None:
             args = {}
 
@@ -1642,6 +1646,10 @@ class SparqlInterface:
         rdf.add (graph, file_uri, rdf.DJHT["upload_url"],    upload_url,    XSD.string)
         rdf.add (graph, file_uri, rdf.DJHT["upload_token"],  upload_token,  XSD.string)
 
+        current_time = datetime.strftime (datetime.now(), "%Y-%m-%dT%H:%M:%S")
+        rdf.add (graph, file_uri, rdf.DJHT["created_date"],  current_time,  XSD.dateTime)
+        rdf.add (graph, file_uri, rdf.DJHT["modified_date"], current_time,  XSD.dateTime)
+
         self.cache.invalidate_by_prefix ("datasets")
         if account_uuid:
             self.cache.invalidate_by_prefix (f"datasets_{account_uuid}")
@@ -1689,6 +1697,7 @@ class SparqlInterface:
                      is_incomplete=None, is_image=None):
         """Procedure to update file metadata."""
 
+        modified_date = datetime.strftime (datetime.now(), "%Y-%m-%dT%H:%M:%SZ")
         query   = self.__query_from_template ("update_file", {
             "account_uuid":  account_uuid,
             "file_uuid":     file_uuid,
@@ -1700,6 +1709,7 @@ class SparqlInterface:
             "file_size":     file_size,
             "is_incomplete": is_incomplete,
             "is_image":      rdf.escape_boolean_value (is_image),
+            "modified_date": modified_date,
             "status":        status
         })
 
@@ -1772,6 +1782,7 @@ class SparqlInterface:
         rdf.add (graph, collaborator_uri, rdf.DJHT["data_read"],     data_read,     XSD.boolean)
         rdf.add (graph, collaborator_uri, rdf.DJHT["data_edit"],     data_edit,     XSD.boolean)
         rdf.add (graph, collaborator_uri, rdf.DJHT["data_remove"],   data_remove,   XSD.boolean)
+        rdf.add (graph, collaborator_uri, rdf.DJHT["item"],          rdf.uuid_to_uri(dataset_uuid, "dataset"), "uri")
         rdf.add (graph, collaborator_uri, rdf.DJHT["account"],       rdf.uuid_to_uri(collaborator_uuid, "account"),  "uri")
 
         if self.add_triples_from_graph (graph):

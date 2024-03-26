@@ -21,6 +21,7 @@ DELETE {
     {%- endif%}{% if filesystem_location is not none %}
     ?file              djht:filesystem_location ?filesystem_location .
     {%- endif%}
+    ?file              djht:modified_date        ?modified_date .
   }
 }
 INSERT {
@@ -44,6 +45,7 @@ INSERT {
     {%- endif%}{% if filesystem_location is not none %}
     ?file              djht:filesystem_location "{{filesystem_location | safe}}"^^xsd:string .
     {%- endif%}
+    ?file              djht:modified_date        "{{modified_date | safe}}"^^xsd:dateTime .
   }
 }
 WHERE {
@@ -53,13 +55,16 @@ WHERE {
     {#- Ensure that the account_uuid associated with the ?file can modify its
      #- properties. #}
     ?dataset           djht:files/rdf:rest*/rdf:first ?file .
-      {
-      ?dataset           djht:container/djht:account    <account:{{account_uuid | safe}}> .
-      } UNION {
-        ?dataset         djht:collaborators/rdf:rest*/rdf:first ?collaborator .
-        ?collaborator    djht:account <account:{{account_uuid | safe}}> .
-        ?collaborator    djht:data_edit "true"^^xsd:boolean .
+    ?dataset           djht:container/djht:account    ?account .
+
+{%- if account_uuid is not none and not disable_collaboration: %}
+    OPTIONAL {
+      ?collaborator      rdf:type            djht:Collaborator .
+      ?collaborator      djht:item           ?dataset .
+      ?collaborator      djht:account        ?collaborator_account .
+      ?collaborator      djht:data_edit      "true"^^xsd:boolean .
     }
+{%- endif %}
 
     OPTIONAL { ?file   djht:id                  ?id . }
     OPTIONAL { ?file   djht:filesystem_location ?filesystem_location . }
@@ -71,7 +76,16 @@ WHERE {
     OPTIONAL { ?file   djht:preview_state       ?preview_state . }
     OPTIONAL { ?file   djht:size                ?size . }
     OPTIONAL { ?file   djht:status              ?status . }
+    OPTIONAL { ?file   djht:modified_date       ?modified_date . }
   }
   FILTER (?file = <file:{{file_uuid | safe}}>)
+{%- if account_uuid is not none: %}
+  {%- if disable_collaboration %}
+  FILTER (?account = <account:{{account_uuid}}>)
+  {%- else %}
+  FILTER (?account = <account:{{account_uuid}}> ||
+          ?collaborator_account = <account:{{account_uuid}}>)
+  {%- endif %}
+{%- endif %}
 }
 {% endblock %}
