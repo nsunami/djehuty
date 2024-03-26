@@ -232,7 +232,7 @@ def split_author_name(name):
 
 def split_delimited_string (input_string, delimiter=","):
     """Returns a list of strings from a delimited string."""
-    if type(input_string) is not str or len(input_string) == 0:
+    if not isinstance(input_string, str) or input_string == "":
         return None
 
     return [item.strip() for item in input_string.split(delimiter)]
