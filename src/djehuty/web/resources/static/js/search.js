@@ -535,6 +535,7 @@ function load_search_results() {
 
     request_params["group"] = request_params["institutions"];
     request_params["page_size"] = page_size;
+    request_params["is_latest"] = 1;
     if (!("page" in request_params)) {
         request_params["page"] = 1;
     }
