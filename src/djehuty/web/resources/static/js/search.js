@@ -108,6 +108,15 @@ function toggle_filter_apply_button(flag) {
     jQuery("#search-filter-apply-button").addClass(classes[0]).removeClass(classes[1]);
 }
 
+function toggle_filter_reset_button(flag) {
+    let color = flag ? "#f49120" : "#eeeeee";
+    let cursor = flag ? "pointer" : "default";
+    let color_text = flag ? "white" : "#cccccc";
+    let classes = flag ? ["enabled", "disabled"] : ["disabled", "enabled"];
+    jQuery("#search-filter-reset-button").css("background", color).css("color", color_text).css("cursor", cursor);
+    jQuery("#search-filter-reset-button").addClass(classes[0]).removeClass(classes[1]);
+}
+
 function toggle_filter_input_text(id, flag) {
     if (flag) {
         jQuery(`#${id}`).show();
@@ -164,6 +173,7 @@ function register_event_handlers() {
             });
         });
         toggle_filter_apply_button(true);
+        toggle_filter_reset_button(false);
         toggle_filter_categories_showmore(true);
     });
 
@@ -179,6 +189,7 @@ function register_event_handlers() {
         jQuery(".search-filter-content input[type='checkbox']").each(function() {
             if (this.checked) {
                 toggle_filter_apply_button(true);
+                toggle_filter_reset_button(true);
                 is_checked = true;
                 return;
             }
@@ -186,6 +197,7 @@ function register_event_handlers() {
 
         if (is_checked == false) {
             toggle_filter_apply_button(true);
+            toggle_filter_reset_button(true);
         }
 
         if (this.id === "checkbox_datatypes_collection") {
@@ -292,9 +304,11 @@ function register_event_handlers() {
 
     jQuery("#textinput_institutions_other").keyup(function() {
         toggle_filter_apply_button(true);
+        toggle_filter_reset_button(true);
     });
     jQuery("#textinput_filetypes_other").keyup(function() {
         toggle_filter_apply_button(true);
+        toggle_filter_reset_button(true);
     });
 
     jQuery('#tile-view-mode').click(function() {
@@ -713,9 +727,7 @@ function sort_search_results(sort_by) {
         jQuery.each(list_items, function(i, row) {
             search_results_list.append(row);
         });
-    } catch (error) {
-        console.log(`Failed to sort the search results: ${sort_by} - ${error}`);
-    }
+    } catch (error) {}
 
     //
     // Sort the tile view
@@ -750,9 +762,7 @@ function sort_search_results(sort_by) {
         jQuery.each(tile_items, function(i, tile) {
             search_results_tiles.append(tile);
         });
-    } catch (error) {
-        console.log(`Failed to sort the search results: ${sort_by} - ${error}`);
-    }
+    } catch (error) {}
 }
 
 function trim_single_word(word) {
