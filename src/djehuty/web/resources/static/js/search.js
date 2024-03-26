@@ -468,11 +468,11 @@ function load_search_results() {
         let today = new Date();
         let year = today.getFullYear() - request_params["publisheddate"];
         let new_date = new Date(year, 0, 1);
-        let since_date = new_date.toISOString()
+        let since_date = new_date.toISOString();
         request_params["published_since"] = `${since_date}`;
     } else if ("publisheddate_other" in request_params && typeof(request_params["publisheddate_other"]) === "string" && request_params["publisheddate_other"].length > 0) {
         let new_date = new Date(request_params["publisheddate_other"]);
-        let since_date = new_date.toISOString()
+        let since_date = new_date.toISOString();
         request_params["published_since"] = `${since_date}`;
     }
 
@@ -602,7 +602,7 @@ function render_search_results(data, page_number) {
 
     update_search_results_count(data, page_number);
     // Sort the search results by the selected sort_by.
-    load_search_preferences()
+    load_search_preferences();
 }
 
 function update_search_results_count(data, current_page=1) {
