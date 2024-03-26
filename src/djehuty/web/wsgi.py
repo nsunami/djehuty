@@ -953,9 +953,13 @@ class ApiServer:
         validator.integer_value (record, "item_type")
         validator.string_value  (record, "doi",             maximum_length=255)
         validator.string_value  (record, "handle",          maximum_length=255)
-        # validator.string_value  (record, "search_for",      maximum_length=1024)
         validator.boolean_value (record, "search_format")
         validator.boolean_value (record, "is_latest")
+
+        try:
+            validator.string_value (record, "search_for",      maximum_length=1024)
+        except validator.InvalidValueType:
+            validator.array_value  (record, "search_for" )
 
         if "categories" in record and record["categories"] is not None:
             for category_id in record["categories"]:
