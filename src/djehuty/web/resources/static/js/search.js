@@ -159,6 +159,9 @@ function register_event_handlers() {
             jQuery(`.search-filter-content input[type='text']`).each(function() {
                 toggle_filter_input_text(this.id, false);
             });
+            jQuery(`.search-filter-content input[type='date']`).each(function() {
+                toggle_filter_input_text(this.id, false);
+            });
         });
         toggle_filter_apply_button(true);
         toggle_filter_categories_showmore(true);
@@ -213,6 +216,11 @@ function register_event_handlers() {
                             this.value = "";
                             toggle_filter_input_text(this.id, false);
                         });
+                        jQuery(`#${event_id} input[type='date']`).each(function() {
+                            this.value = "";
+                            toggle_filter_input_text(this.id, false);
+                        });
+
                     });
                     target_element.checked = true;
                 }
@@ -222,6 +230,10 @@ function register_event_handlers() {
                 jQuery(`#${event_id} input[type='text']`).each(function() {
                     toggle_filter_input_text(this.id, target_element.checked);
                 });
+                jQuery(`#${event_id} input[type='date']`).each(function() {
+                    toggle_filter_input_text(this.id, target_element.checked);
+                });
+
             }
         });
     }
@@ -232,10 +244,6 @@ function register_event_handlers() {
             return;
         }
 
-        if (validate_publisheddate_other()) {
-            return;
-        }
-
         jQuery(".search-filter-content input").each(function() {
             if (this.type === "checkbox" && !this.checked) { return; }
             let filter_name = this.id.split("_")[1];
@@ -243,7 +251,7 @@ function register_event_handlers() {
             if (!(filter_name in filter_info)) { return; }
             if (this.type === "checkbox" && value !== "other") {
                 filter_info[filter_name]["values"].push(value);
-            } else if (this.type === "text" && value.length > 0) {
+            } else if ((this.type === "text" || this.type === "date") && value.length > 0) {
                 filter_info[filter_name]["other_value"] = value;
             } else {
                 return;
@@ -282,7 +290,6 @@ function register_event_handlers() {
         window.location.href = new_url;
     });
 
-    jQuery("#textinput_publisheddate_other").keyup(validate_publisheddate_other);
     jQuery("#textinput_institutions_other").keyup(function() {
         toggle_filter_apply_button(true);
     });
@@ -302,52 +309,6 @@ function register_event_handlers() {
         let sort_by = jQuery('#sort-by').val();
         toggle_sort_by(sort_by);
     });
-}
-
-function validate_publisheddate_other() {
-    let div_error_id = "textinput-publisheddate-other-error";
-    let input_id = "textinput_publisheddate_other";
-    jQuery(`#${div_error_id}`).show();
-    let published_date = jQuery(`#${input_id}`).val();
-
-    if (!published_date) {
-        return 0;
-    }
-
-    // Date format: YYYY-MM-DD
-    try {
-        let date_regex = /^\d{4}-\d{2}-\d{2}$/;
-        if (!date_regex.test(published_date)) {
-            jQuery(`#${div_error_id}`).text("Invalid date format.").css("color", "red");
-            jQuery(`#${input_id}`).focus();
-            return 1;
-        }
-        let epoch_time = Date.parse(published_date);
-        let epoch_2000 = Date.parse("2000-01-01");
-        let epoch_now = Date.now();
-        if (isNaN(epoch_time)) {
-            jQuery(`#${div_error_id}`).text("Invalid date format.").css("color", "red");
-            return 1;
-        }
-
-        if (epoch_time > epoch_now) {
-            jQuery(`#${div_error_id}`).text("Date cannot be in the future.").css("color", "red");
-            return 1;
-        }
-
-        if (epoch_time < epoch_2000) {
-            jQuery(`#${div_error_id}`).text("Can't be older than 2000.").css("color", "red");
-            return 1;
-        }
-        jQuery(`#${div_error_id}`).text("Valid date format.").css("color", "green");
-        toggle_filter_apply_button(true);
-        return 0;
-
-    } catch (error) {
-        console.log(error);
-        jQuery(`#${div_error_id}`).text("Invalid date format.").css("color", "red");
-        return 1;
-    }
 }
 
 function load_search_filters_from_url() {
