@@ -6,7 +6,7 @@ WHERE {
     ?log_entry a djht:LogEntry .
     ?log_entry djht:event_type  ?event_type .
     ?log_entry djht:created ?created . 
-    ?container_id  a djht:DatasetContainer . 
+    ?log_entry djht:dataset ?container_id .
   }
 {% if filters is not none %}{{ filters | safe }}
 
