@@ -14,7 +14,10 @@
 #wrapper #content #description p { margin-top: 0; margin-bottom:0 }
 #wrapper #content #authors img, #contributors img  { height: 15px }
 #wrapper #content .metric       { float: left; margin:5px; text-align: center }
-#wrapper #content .metric .number { font-size: 24px; font-weight: bold }
+#wrapper #content .metric .number { font-size: 12px; font-weight: bold }
+#wrapper #content .metric .number .button { border: none; color: white; padding: 8px 10px; text-align: center; text-decoration: none; display: inline-block; font-size: 12x; margin: 2px 2px; transition-duration: 0.4s; cursor: pointer;}
+#wrapper #content .metric .number .button1 { background-color: white; color: black;  border: 2px solid #04AA6D; }
+#wrapper #content .metric .number .button1:hover { background-color: #04AA6D;    color: white;}
 #wrapper #content #categories   { padding-top: 10px; clear: left }
 #wrapper #content #tags, #geo, #time_coverage, #dates, #collections, #peer, #references, #publisher, #format, #organizations,
 #wrapper #content #contributors, #funding, #usage, #derived_from, #same_as, #language, #licence, #export, #data_link

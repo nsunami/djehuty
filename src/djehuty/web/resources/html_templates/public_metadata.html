@@ -88,14 +88,14 @@
             <div class="label">usage stats</div>
     {% for metric in statistics %}
             <div class="metric">
-                <div class="number">{{statistics[metric]}}</div>
+                <div class="number"><button class="button button1"> {{statistics[metric]}}</button> </div>
                 {{metric.replace("cites", "citations")}}
             </div>
     {% endfor %}
         </div>
 {% endif %}
-        <p> <br> <br></p>
-        <div class="label">stats plot</div>
+        <p><br>
+             <br></p>
         <div id="chart-container"></div>
             <script>
                 d3.json('/v3/log-entry/search/{{item.container_uuid}}')
