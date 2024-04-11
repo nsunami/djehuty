@@ -112,11 +112,33 @@
                     d => d3.timeDay(d.created) // Grouping function (per day)
                 );
 
-                // Convert rollupData map to array
-                const aggregatedData = Array.from(rollupData, ([key, value]) => ({ date: key, count: value }));
+                // Get the range of dates from your data
+                const startDate = d3.min(data, d => d.created);
+                const endDate = d3.max(data, d => d.created);
+                const dateRange = d3.timeDay.range(startDate, endDate, 1); // 1-day interval
 
+                // Convert rollupData map to array
+                let aggregatedData = Array.from(rollupData, ([key, value]) => ({ date: key, count: value }));
+
+                
+                // Iterate through dateRange and check if each date exists in aggregatedData
+                dateRange.forEach(date => {
+                    const existingData = aggregatedData.find(d => d.date.getTime() === date.getTime());
+                    if (!existingData) {
+                        aggregatedData.push({ date, count: 0 }); // Append zero count for missing date
+                    }
+                });
+   
                 // Sort the aggregatedData array by date
                 aggregatedData.sort((a, b) => a.date - b.date);
+
+                // Accumulate counts
+                let accumulatedData = [];
+                let accumulatedCount = 0;
+                aggregatedData.forEach(d => {
+                    accumulatedCount += d.count;
+                    accumulatedData.push({ date: d.date, count: accumulatedCount });
+                });
 
                 // Set the dimensions of the canvas
                 var margin = { top: 30, right: 45, bottom: 20, left: 20},
@@ -130,24 +152,15 @@
                     .append("g")
                     .attr("transform",
                         "translate(" + margin.left + "," + margin.top + ")");
-
-                // Accumulate counts
-                let accumulatedData = [];
-                let accumulatedCount = 0;
-                aggregatedData.forEach(d => {
-                    accumulatedCount += d.count;
-                    accumulatedData.push({ date: d.date, count: accumulatedCount });
-                });
+                
                 // Set up scales
                 const xScale = d3.scaleTime()
-                    .domain(d3.extent(accumulatedData, d => d.date))
+                    .domain(d3.extent(aggregatedData, d => d.date))
                     .range([0, width]);
 
                 const yScale = d3.scaleLinear()
-                    .domain([0, d3.max(accumulatedData, d => d.count)])
+                    .domain([0, d3.max(aggregatedData, d => d.count)])
                     .range([height, 0]);
-
-                
 
                 // Define the line generator
                 const line = d3.line()
@@ -161,30 +174,30 @@
                     .y1(d => yScale(d.count));
                 
                 // Draw the area
-                svg.append("path")
-                .datum(accumulatedData)
-                .attr("class", "area")
-                .attr("d", area)
-                .style("fill", "#A0153E");
-
-                 // Draw the line to the area plot
-                 svg.append("path")
-                .datum(accumulatedData)
-                .attr("class", "line")
-                .attr("fill", "none")
-                .attr("stroke", "#FF204E")
-                .attr("stroke-width", 1)
-                .attr("d", line);
-                
-                // for daily views
-                // // Draw the line
                 // svg.append("path")
+                // .datum(aggregatedData)
+                // .attr("class", "area")
+                // .attr("d", area)
+                // .style("fill", "#A0153E");
+
+                //  // Draw the line to the area plot
+                //  svg.append("path")
                 // .datum(aggregatedData)
                 // .attr("class", "line")
                 // .attr("fill", "none")
                 // .attr("stroke", "#FF204E")
                 // .attr("stroke-width", 1)
                 // .attr("d", line);
+                
+                //for daily views
+                // Draw the line
+                svg.append("path")
+                .datum(aggregatedData)
+                .attr("class", "line")
+                .attr("fill", "none")
+                .attr("stroke", "#FF204E")
+                .attr("stroke-width", 1)
+                .attr("d", line);
                 
                 // Add X axis
                 svg.append("g")
