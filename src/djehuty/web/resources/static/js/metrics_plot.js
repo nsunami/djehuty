@@ -1,4 +1,7 @@
 function generatePlot(data) {
+
+    d3.select("#chart-container").selectAll("svg").remove();
+    
     // Parse dates
     const parseTime = d3.timeParse("%Y-%m-%dT%H:%M:%S");
     data.forEach(d => {

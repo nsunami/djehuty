@@ -99,9 +99,9 @@
             <div class="tooltip"></div>
             <input type="range" name="mySlider" id=mySlider min="10" max="100" value="50">
             <script>
-                const containerUUID = "{{item.container_uuid}}"; 
+                
                 let apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=2`;
-                let existingPlot = null;
+        
                 function updateMetricApi(metric) {
                     if (metric === "views") {
                         apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=1`;
