@@ -4,8 +4,8 @@
 #wrapper #content #doi span     { color: #fff; background-color: #000; padding: 0px 5px 0px 5px }
 #wrapper #content #doi #container_doi       { display: none; position: absolute; background-color: #fff; width: 500px; border: 2px solid #000; padding:5px }
 #wrapper #content #doi:hover #container_doi { display: block }
-#wrapper #content #chart-container {background-color: #ffeaeaeb}
-#wrapper #content #chart-container:hover {background-color: #ffc2c2; display: block}
+#wrapper #content #chart-container {background-color: #ffffff}
+#wrapper #content #chart-container:hover {background-color: #ffffff; display: block}
 #wrapper #content #chart-container rect rect { pointer-events: all; fill-opacity: 0; stroke-opacity: 0; z-index: 1;}
 #wrapper #content #chart-container .tooltip{ position: absolute; padding: 5px; background-color: rgb(11, 40, 65); color: white; border: 0px solid white; border-radius: 0px; display: none; opacity: .75; font-size: 14px;}
 #wrapper #content #chart-container .tooltip-line {stroke-opacity: 0.5;}

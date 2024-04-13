@@ -76,30 +76,50 @@ d3.json(apiUrl)
             .y0(height)
             .y1(d => yScale(d.count));
 
+        
+        // Create our gradient  
+        const gradient = svg.append("defs")
+            .append("linearGradient")
+            .attr("id", "gradient")
+            .attr("x1", "0%")
+            .attr("x2", "0%")
+            .attr("y1", "0%")
+            .attr("y2", "100%")
+            .attr("spreadMethod", "pad");
 
-        svg.append("path")
-            .datum(aggregatedData)
-            .attr("fill", "none")
-            .attr("stroke", "steelblue")
-            .attr("stroke-width", 1)
-            .attr("d", line);
+        gradient.append("stop")
+            .attr("offset", "0%")
+            .attr("stop-color", "#009eb0")
+            .attr("stop-opacity", 1);
+
+        gradient.append("stop")
+            .attr("offset", "100%")
+            .attr("stop-color", "#b51963")
+            .attr("stop-opacity", 1);
+
+        // svg.append("path")
+        //     .datum(aggregatedData)
+        //     .attr("fill", "none")
+        //     .attr("stroke", "steelblue")
+        //     .attr("stroke-width", 1)
+        //     .attr("d", line);
 
         // Add circles for lollipop ends
-        svg.selectAll(".circle")
-            .data(aggregatedData)
-            .enter().append("circle")
-            .attr("class", "circle")
-            .attr("cx", d => xScale(d.date))
-            .attr("cy", d => yScale(d.count))
-            .attr("r", 1)
-            .attr("fill", "pink");
+        // svg.selectAll(".circle")
+        //     .data(aggregatedData)
+        //     .enter().append("circle")
+        //     .attr("class", "circle")
+        //     .attr("cx", d => xScale(d.date))
+        //     .attr("cy", d => yScale(d.count))
+        //     .attr("r", 1)
+        //     .attr("fill", "pink");
 
         //Draw the area
-        // svg.append("path")
-        // .datum(aggregatedData)
-        // .attr("class", "area")
-        // .attr("d", area)
-        // .style("fill", "#A0153E");
+        svg.append("path")
+        .datum(aggregatedData)
+        .attr("class", "area")
+        .attr("d", area)
+        .style("fill", "url(#gradient)");
 
         //  // Draw the line to the area plot
         //  svg.append("path")
