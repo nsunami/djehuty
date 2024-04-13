@@ -42,6 +42,15 @@ d3.json(apiUrl)
             accumulatedData.push({ date: d.date, count: accumulatedCount });
         });
 
+        
+        // Calculate sum of counts
+        const totalCount = aggregatedData.reduce((total, data) => total + data.count, 0);
+
+        // Calculate average count
+        const averageCount = totalCount / aggregatedData.length;
+
+        console.log("Average Count:", averageCount);
+        
         // Set the dimensions of the canvas
         var margin = { top: 30, right: 20, bottom: 20, left: 20 },
             width = 370 - margin.left - margin.right,
@@ -60,8 +69,17 @@ d3.json(apiUrl)
             .domain(d3.extent(aggregatedData, d => d.date))
             .range([0, width]);
 
+    
+        // // Add the average line
+        // svg.append("line")
+        //     .attr("class", "average-line")
+        //     .attr("x1", x(averageCount))
+        //     .attr("y1", 0)
+        //     .attr("x2", x(averageCount))
+        //     .attr("y2", height);  
+
         const yScale = d3.scaleLinear()
-            .domain([0, d3.max(aggregatedData, d => d.count)])
+            .domain([0, averageCount])
             .range([height, 0]);
 
         // Define the line generator
@@ -139,6 +157,8 @@ d3.json(apiUrl)
         // .attr("stroke", "#FF204E")
         // .attr("stroke-width", 1)
         // .attr("d", line);
+
+
 
         // Add X axis
         svg.append("g")
