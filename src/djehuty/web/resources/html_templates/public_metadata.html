@@ -99,38 +99,38 @@
             <script>
                 const containerUUID = "{{item.container_uuid}}"; 
                 let apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=2`;
+                let existingPlot = null;
                 function displayMetric(metric, value) {
                     console.log("Metric: " + metric);
                     console.log("Metric value: " + value);
                     if (metric === "views") {
-                        apiUrl = `${apiUrl}?event_type=1`;
+                        apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=1`;
+                        console.log("API URL: " + apiUrl);
+                        console.log("hi");
                     } else if (metric === "downloads") {
-                       apiUrl = `${apiUrl}?event_type=2`;
+                       apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=2`;
                     } else {
                         // Handle other metrics if needed
                         console.log("Unknown metric: " + metric);
                         return;
                     }
-                    // console.log("API URL: " + url); 
-                    callApi(apiUrl);   
-                   }
-                   console.log("API URL: " + apiUrl); 
-                   function callApi(url) {
-        // Make your API call using the updated apiUrl
-        // For example:
-        fetch(url)
-            .then(response => response.json())
-            .then(data => {
-                // Process the API response data here
-                console.log(data);
-            })
-            .catch(error => {
-                console.error('Error fetching data:', error);
-            });
-    }
+                    console.log("API URL: " + apiUrl); 
+                    loadMetricsPlotScript(); // Call function to load metrics_plot.js
+                }
+
+                function loadMetricsPlotScript() {
+                    // Remove existing plot if it exists
+                    if (existingPlot) {
+                        existingPlot.destroy();
+                    }
+
+                    // Append a timestamp as a query parameter to the script URL
+                    const timestamp = new Date().getTime();
+                    const scriptElement = document.createElement('script');
+                    scriptElement.src = `../static/js/metrics_plot.js?${timestamp}`;
+                    document.head.appendChild(scriptElement);
+                }
             </script>
- 
-             <script src="../static/js/metrics_plot.js"></script>
 
         </div>
 {% endif %}
