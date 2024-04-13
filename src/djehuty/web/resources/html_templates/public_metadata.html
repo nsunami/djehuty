@@ -1,5 +1,7 @@
 {% block public_metadata  %}
 <script src="/static/js/d3.v7.min.js"></script>
+<script src="../static/js/metrics_plot.js"></script>
+
 <h2>{{item.title}}</h2>
 
 {% if item.is_embargoed: %}
@@ -100,65 +102,45 @@
                 const containerUUID = "{{item.container_uuid}}"; 
                 let apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=2`;
                 let existingPlot = null;
-                function displayMetric(metric) {
+                function updateMetricApi(metric) {
                     if (metric === "views") {
                         apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=1`;
                     } else if (metric === "downloads") {
                        apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=2`;
                     } else {
                         // Handle other metrics if needed
-                        console.log("Unknown metric: " + metric);
                         return;
                     }
-                    console.log("API URL: " + apiUrl); 
-                    loadMetricsPlotScript(); // Call function to load metrics_plot.js
+
+                    // load latest API data and through processData re-create plot
+                    d3.json(apiUrl)
+                    .then(function (data) {
+                        generatePlot(data);
+                        })
+                    .catch(function (error) {
+                        console.error("Error fetching data: " + error);
+                    });
                 }
 
-                function loadMetricsPlotScript() {
-                    // Remove existing plot if it exists
-                    if (existingPlot) {
-                        existingPlot.destroy();
-                    }
-
-                    // Append a timestamp as a query parameter to the script URL
-                    const timestamp = new Date().getTime();
-                    const scriptElement = document.createElement('script');
-                    scriptElement.src = `../static/js/metrics_plot.js?${timestamp}`;
-                    document.head.appendChild(scriptElement);
-                }
-
-                 // Function to toggle button state
+                // Function to toggle button state
                 function toggleButton(button, metric) {
-                    // Toggle button class
-                    button.classList.toggle('pressed');
-                    
+                    // Remove 'pressed' class from all buttons
+                    d3.selectAll('.button.button1').classed('pressed', false);
+                    // Toggle 'pressed' class for the current button
+                    d3.select(button).classed('pressed', !d3.select(button).classed('pressed'));
                     // Check if button is pressed
-                    const isPressed = button.classList.contains('pressed');
-                    
-                    if (isPressed) {
-                        // Perform action when button is pressed
-                        console.log("Button for " + metric + " is pressed with value ");
-                    } else {
-                        // Perform action when button is released
-                        console.log("Button for " + metric + " is released");
-                    }
-                    
+                    const isPressed = d3.select(button).classed('pressed');
+                    updateMetricApi(metric);
                     // Check if any other button is pressed and perform action
                     checkOtherButtons(button);
-                    displayMetric(metric);
                 }
-                
+
                 // Function to check if any other button is pressed
                 function checkOtherButtons(currentButton) {
-                    const buttons = document.querySelectorAll('.button.button1');
-                    
-                    buttons.forEach(button => {
-                        if (button !== currentButton && button.classList.contains('pressed')) {
-                            // Perform action when another button is pressed
-                            console.log("Another button is pressed");
-                            
+                    d3.selectAll('.button.button1').each(function() {
+                        if (this !== currentButton && d3.select(this).classed('pressed')) {
                             // Release the other button
-                            button.classList.remove('pressed');
+                            d3.select(this).classed('pressed', false);
                         }
                     });
                 }
