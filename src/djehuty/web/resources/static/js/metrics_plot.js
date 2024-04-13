@@ -59,6 +59,7 @@ function generatePlot(data) {
     var svg = d3.select("#chart-container").append("svg")
         .attr("width", width + margin.left + margin.right)
         .attr("height", height + margin.top + margin.bottom)
+        .call(responsivefy)
         .append("g")
         .attr("transform",
             "translate(" + margin.left + "," + margin.top + ")");
@@ -146,7 +147,7 @@ function generatePlot(data) {
     // .attr("stroke", "#FF204E")
     // .attr("stroke-width", 0.1)
     // .attr("d", line);
-    console.log(margin)
+
     //for daily views
     // Draw the line
     // svg.append("path")
@@ -167,6 +168,31 @@ function generatePlot(data) {
     // Add Y axis
     svg.append("g")
         .attr("transform", `translate(${width},0)`)
-        .call(d3.axisRight(yScale));
-
+        .call(d3.axisRight(yScale));  
 }
+
+function responsivefy(svg) {
+    // Get container's width and height
+    const container = d3.select(svg.node().parentNode);
+    const width = parseInt(svg.style("width"));
+    const height = parseInt(svg.style("height"));
+
+    // Calculate aspect ratio
+    const aspect = width / height;
+
+    // Add viewBox and preserveAspectRatio properties, and resize svg
+    svg.attr("viewBox", `0 0 ${width} ${height}`)
+        .attr("preserveAspectRatio", "xMinYMid")
+        .call(resize);
+
+    // Add resize event listener
+    d3.select(window).on("resize." + container.attr("id"), resize);
+
+    // Function to handle resizing
+    function resize() {
+        const targetWidth = parseInt(container.style("width"));
+        svg.attr("width", targetWidth);
+        svg.attr("height", Math.round(targetWidth / aspect));
+    }
+}
+
