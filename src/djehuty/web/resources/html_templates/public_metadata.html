@@ -88,7 +88,7 @@
             <div class="label">usage stats</div>
     {% for metric in statistics %}
             <div class="metric">
-                <div class="number"><button class="button button1" onclick="displayMetric('{{metric}}', '{{statistics[metric]}}')"> {{statistics[metric]}}</button> </div>
+                <div class="number"><button class="button button1" onclick="toggleButton(this, '{{metric}}')"> {{statistics[metric]}}</button> </div>
                 {{metric.replace("cites", "citations")}}
               
             </div>      
@@ -100,13 +100,9 @@
                 const containerUUID = "{{item.container_uuid}}"; 
                 let apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=2`;
                 let existingPlot = null;
-                function displayMetric(metric, value) {
-                    console.log("Metric: " + metric);
-                    console.log("Metric value: " + value);
+                function displayMetric(metric) {
                     if (metric === "views") {
                         apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=1`;
-                        console.log("API URL: " + apiUrl);
-                        console.log("hi");
                     } else if (metric === "downloads") {
                        apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=2`;
                     } else {
@@ -129,6 +125,42 @@
                     const scriptElement = document.createElement('script');
                     scriptElement.src = `../static/js/metrics_plot.js?${timestamp}`;
                     document.head.appendChild(scriptElement);
+                }
+
+                 // Function to toggle button state
+                function toggleButton(button, metric) {
+                    // Toggle button class
+                    button.classList.toggle('pressed');
+                    
+                    // Check if button is pressed
+                    const isPressed = button.classList.contains('pressed');
+                    
+                    if (isPressed) {
+                        // Perform action when button is pressed
+                        console.log("Button for " + metric + " is pressed with value ");
+                    } else {
+                        // Perform action when button is released
+                        console.log("Button for " + metric + " is released");
+                    }
+                    
+                    // Check if any other button is pressed and perform action
+                    checkOtherButtons(button);
+                    displayMetric(metric);
+                }
+                
+                // Function to check if any other button is pressed
+                function checkOtherButtons(currentButton) {
+                    const buttons = document.querySelectorAll('.button.button1');
+                    
+                    buttons.forEach(button => {
+                        if (button !== currentButton && button.classList.contains('pressed')) {
+                            // Perform action when another button is pressed
+                            console.log("Another button is pressed");
+                            
+                            // Release the other button
+                            button.classList.remove('pressed');
+                        }
+                    });
                 }
             </script>
 
