@@ -51,7 +51,7 @@ function generatePlot(data) {
 
 
     // Set the dimensions of the canvas
-    var margin = { top: 30, right: 20, bottom: 20, left: 20 },
+    var margin = { top: 30, right: 50, bottom: 20, left: 20 },
         width = 370 - margin.left - margin.right,
         height = 250 - margin.top - margin.bottom;
 
@@ -79,8 +79,10 @@ function generatePlot(data) {
     //     .attr("y2", height);  
 
     const yScale = d3.scaleLinear()
-        .domain([0, averageCount])
-        .range([height, 0]);
+    .domain([0, d3.max(aggregatedData, d => d.count)])
+    .range([height, 0]);
+        // .domain([0, averageCount])
+        // .range([height, 0]);
 
     // Define the line generator
     var line = d3.line()
@@ -137,7 +139,9 @@ function generatePlot(data) {
         .datum(aggregatedData)
         .attr("class", "area")
         .attr("d", area)
-        .style("fill", "url(#gradient)");
+        .style("fill", "url(#gradient)")
+        .call(animatePath); 
+
 
     //  // Draw the line to the area plot
     //  svg.append("path")
@@ -157,6 +161,16 @@ function generatePlot(data) {
     // .attr("stroke", "#FF204E")
     // .attr("stroke-width", 1)
     // .attr("d", line);
+
+    // Draw the line
+    svg.append("path")
+        .datum(aggregatedData) // Use accumulatedData instead of aggregatedData for the line
+        .attr("class", "line")
+        .attr("fill", "none")
+        .attr("stroke", "#FF204E")
+        .attr("stroke-width", 1)
+        .attr("d", line)
+        .call(animatePath); // Animate 'path'
 
 
 
@@ -194,5 +208,18 @@ function responsivefy(svg) {
         svg.attr("width", targetWidth);
         svg.attr("height", Math.round(targetWidth / aspect));
     }
+}
+
+
+// Function to animate path
+function animatePath(path) {
+    path.transition()
+        .duration(2000) // Total duration for animation
+        .attrTween("stroke-dasharray", function() {
+            const length = this.getTotalLength();
+            return function(t) {
+                return (d3.interpolateString("0," + length, length + ",0"))(t);
+            };
+        });
 }
 
