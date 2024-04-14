@@ -69,20 +69,23 @@ function generatePlot(data) {
         .domain(d3.extent(aggregatedData, d => d.date))
         .range([0, width]);
 
-
-    // // Add the average line
-    // svg.append("line")
-    //     .attr("class", "average-line")
-    //     .attr("x1", x(averageCount))
-    //     .attr("y1", 0)
-    //     .attr("x2", x(averageCount))
-    //     .attr("y2", height);  
-
     const yScale = d3.scaleLinear()
     .domain([0, d3.max(aggregatedData, d => d.count)])
     .range([height, 0]);
-        // .domain([0, averageCount])
-        // .range([height, 0]);
+    // .domain([0, averageCount])
+    // .range([height, 0]);
+
+    
+// Create the average count line
+    svg.append("line")
+        .attr("x1", 0) 
+        .attr("x2", width) 
+        .attr("y1", yScale(averageCount)) 
+        .attr("y2", yScale(averageCount)) 
+        .attr("stroke", "black") 
+        .attr("stroke-width", 2) 
+        .call(animatePath); 
+
 
     // Define the line generator
     var line = d3.line()
@@ -172,7 +175,13 @@ function generatePlot(data) {
         .attr("d", line)
         .call(animatePath); // Animate 'path'
 
-
+    // Text label for the average count
+    svg.append("text")
+        .attr("x", width - 10) 
+        .attr("y", yScale(averageCount) - 5) 
+        .attr("text-anchor", "end") 
+        .attr("fill", "black") 
+        .text(`Average: ${averageCount.toFixed(2)}`); 
 
     // Add X axis
     svg.append("g")
@@ -183,6 +192,8 @@ function generatePlot(data) {
     svg.append("g")
         .attr("transform", `translate(${width},0)`)
         .call(d3.axisRight(yScale));  
+
+
 }
 
 function responsivefy(svg) {
