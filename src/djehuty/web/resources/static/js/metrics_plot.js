@@ -120,6 +120,28 @@ function generatePlot(data, yAxisLabel) {
         .attr("stop-color", "#04AA6D" )
         .attr("stop-opacity", 1);
 
+      // Add vertical gridlines
+    svg.selectAll("xGrid")
+        .data(xScale.ticks().slice(1))
+        .join("line")
+        .attr("x1", d => xScale(d))
+        .attr("x2", d => xScale(d))
+        .attr("y1", 0)
+        .attr("y2", height)
+        .attr("stroke", "#e0e0e0")
+        .attr("stroke-width2", .5);
+
+    // Add horizontal gridlines
+    svg.selectAll("yGrid")
+        .data(yScale.ticks().slice(1))
+        .join("line")
+        .attr("x1", 0)
+        .attr("x2", width)
+        .attr("y1", d => yScale(d))
+        .attr("y2", d => yScale(d))
+        .attr("stroke", "#e0e0e0")
+        .attr("stroke-width2", .5)
+
     // Draw the line
     svg.append("path")
         .datum(aggregatedData)
