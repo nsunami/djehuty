@@ -97,7 +97,7 @@
     {% endfor %}
     <div id="chart-container"></div>
             <script>             
-                let apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=2`;        
+                let apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=2`; 
                 function updateMetricApi(metric) {
                     if (metric === "views") {
                         apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=1`;
@@ -140,6 +140,12 @@
                         }
                     });
                 }
+
+                // Call the function to create a default views plot when the window loads
+                window.onload = function() {
+                    const defaultViewPlot = document.querySelector('.button1');
+                    toggleButton(defaultViewPlot, 'views');
+                };
             </script>
 
         </div>
