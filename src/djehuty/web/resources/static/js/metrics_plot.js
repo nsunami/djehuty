@@ -51,7 +51,7 @@ function generatePlot(data, yAxisLabel) {
 
 
     // Set the dimensions of the canvas
-    var margin = { top: 30, right: 50, bottom: 20, left: 20 },
+    var margin = { top: 30, right: 50, bottom: 40, left: 20 },
         width = 370 - margin.left - margin.right,
         height = 250 - margin.top - margin.bottom;
 
@@ -155,16 +155,16 @@ function generatePlot(data, yAxisLabel) {
         .call(d3.axisBottom(xScale).ticks(6));
     
     // Style for tick labels on x-axis
-      svg.selectAll(".x-axis text")
+    svg.selectAll(".x-axis text")
       .style("fill", "#777"); 
 
-      // Add the chart title
-      svg.append("text")
+    // Add the chart title
+    svg.append("text")
       .attr("class", "chart-title")
-      .attr("x", margin.left -15 )
-      .attr("y", margin.top - 25  )
+      .attr("x", width/2 -10)
+      .attr("y", height   + 30)
       .style("fill", "#777")
-      .style("font-size", "10px")
+      .style("font-size", "12px")
       .style("font-weight", "bold")
       .text(yAxisLabel);
 }

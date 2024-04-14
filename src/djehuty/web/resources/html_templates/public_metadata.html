@@ -101,11 +101,12 @@
                 function updateMetricApi(metric) {
                     if (metric === "views") {
                         apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=1`;
-                        yAxisLabel = "daily views"; // Set the x-axis label for views
+                        yAxisLabel = "Daily Views"; // Set the x-axis label for views
                     } else if (metric === "downloads") {
                        apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=2`;
-                       yAxisLabel = "daily downloads"; // Set the x-axis label for downloads
+                       yAxisLabel = "Daily Downloads"; // Set the x-axis label for downloads
                     } else {
+                        d3.select("#chart-container").selectAll("svg").remove();
                         // Handle other metrics if needed
                         return;
                     }
