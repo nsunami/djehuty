@@ -64,6 +64,9 @@ function generatePlot(data, yAxisLabel) {
         .attr("transform",
             "translate(" + margin.left + "," + margin.top + ")");
 
+    
+    const container = d3.select(svg.node().parentNode);
+
     // Set up scales
     const xScale = d3.scaleTime()
         .domain(d3.extent(aggregatedData, d => d.date))
@@ -99,6 +102,24 @@ function generatePlot(data, yAxisLabel) {
         .y0(height)
         .y1(d => yScale(d.count));
 
+
+    // Add tooltip
+    var tooltip = d3.select("#chart-container").append("div")
+    .attr("class", "tooltip")
+    .style("opacity", 1);
+            
+    // Add a circle element
+    const circle = svg.append("circle")
+        .attr("r", 0)
+        .attr("fill", "steelblue")
+        .style("stroke", "white")
+        .attr("opacity", .70)
+        .style("pointer-events", "none");
+
+    // create a listening rectangle
+    const listeningRect = svg.append("rect")
+        .attr("width", width)
+        .attr("height", height);
 
     // Create our gradient  
     const gradient = svg.append("defs")
@@ -151,6 +172,47 @@ function generatePlot(data, yAxisLabel) {
         .attr("stroke-width", 1)
         .attr("d", line)
         .call(animatePath); // Animate 'path'
+    
+      // create the mouse move function
+      listeningRect.on("mousemove", function (event) {
+        const [xCoord] = d3.pointer(event, this);
+        const bisectDate = d3.bisector(d => d.date).left;
+        const x0 = xScale.invert(xCoord);
+        const i = bisectDate(aggregatedData, x0, 1);
+        const d0 = aggregatedData[i - 1];
+        const d1 = aggregatedData[i];
+        const d2 = accumulatedData[i];
+        const d = x0 - d0.date > d1.date - x0 ? d1 : d0;
+        const xPos = xScale(d.date);
+        const yPos = yScale(d.count);
+        
+        
+        // Update the circle position
+        circle.attr("cx", xPos)
+        .attr("cy", yPos);
+
+        // Add transition for the circle radius
+        circle.transition()
+        .duration(50)
+        .attr("r", 5); // originally 5 
+
+        // add in  our tooltip
+        tooltip
+        .style("display", "block")
+        .style("left", `${xPos + container.node().getBoundingClientRect().width * 1.25}px`) 
+        .style("top", `${yPos + container.node().getBoundingClientRect().height * 0.6}px`) 
+        .call(responsivefy, container)
+        .html(`<strong>Date:</strong> ${d.date.toLocaleDateString('en-GB')}<br><strong>Total:</strong> ${d2.count !== undefined ? (d2.count).toFixed(0) : 'N/A'} <br> <strong>Daily:</strong> ${d1.count !== undefined ? (d1.count).toFixed(0) : 'N/A' } `)
+    });
+    
+    // listening rectangle mouse leave function
+    listeningRect.on("mouseleave", function () {
+        circle.transition()
+        .duration(50)
+        .attr("r", 0);
+
+    tooltip.style("display", "none");
+});
 
     // Text label for the average count
     svg.append("text")
