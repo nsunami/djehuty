@@ -1,7 +1,7 @@
-function generatePlot(data) {
+function generatePlot(data, yAxisLabel) {
 
     d3.select("#chart-container").selectAll("svg").remove();
-    
+
     // Parse dates
     const parseTime = d3.timeParse("%Y-%m-%dT%H:%M:%S");
     data.forEach(d => {
@@ -142,11 +142,21 @@ function generatePlot(data) {
     svg.append("g")
         .attr("transform", `translate(${width},0)`)
         .call(d3.axisRight(yScale).ticks(6));
-        
+
     // Add X axis
     svg.append("g")
         .attr("transform", `translate(0,${height})`)
         .call(d3.axisBottom(xScale).ticks(6));
+
+      // Add the chart title
+      svg.append("text")
+      .attr("class", "chart-title")
+      .attr("x", margin.left -15 )
+      .attr("y", margin.top - 25  )
+      .style("fill", "#777")
+      .style("font-size", "10px")
+      .style("font-weight", "bold")
+      .text(yAxisLabel);
 }
 
 function responsivefy(svg) {
