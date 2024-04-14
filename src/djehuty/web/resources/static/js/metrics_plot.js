@@ -140,13 +140,23 @@ function generatePlot(data, yAxisLabel) {
 
     // Add Y axis
     svg.append("g")
+        .attr("class", "y-axis")
         .attr("transform", `translate(${width},0)`)
         .call(d3.axisRight(yScale).ticks(6));
 
+    // Style for tick labels on y-axis
+    svg.selectAll(".y-axis text")
+        .style("fill", "#777"); 
+
     // Add X axis
     svg.append("g")
+        .attr("class", "x-axis")
         .attr("transform", `translate(0,${height})`)
         .call(d3.axisBottom(xScale).ticks(6));
+    
+    // Style for tick labels on x-axis
+      svg.selectAll(".x-axis text")
+      .style("fill", "#777"); 
 
       // Add the chart title
       svg.append("text")
