@@ -112,65 +112,20 @@ function generatePlot(data) {
 
     gradient.append("stop")
         .attr("offset", "0%")
-        .attr("stop-color", "#009eb0")
+        .attr("stop-color", "#b51963")
         .attr("stop-opacity", 1);
 
     gradient.append("stop")
         .attr("offset", "100%")
-        .attr("stop-color", "#b51963")
+        .attr("stop-color", "#04AA6D" )
         .attr("stop-opacity", 1);
 
-    // svg.append("path")
-    //     .datum(aggregatedData)
-    //     .attr("fill", "none")
-    //     .attr("stroke", "steelblue")
-    //     .attr("stroke-width", 1)
-    //     .attr("d", line);
-
-    // Add circles for lollipop ends
-    // svg.selectAll(".circle")
-    //     .data(aggregatedData)
-    //     .enter().append("circle")
-    //     .attr("class", "circle")
-    //     .attr("cx", d => xScale(d.date))
-    //     .attr("cy", d => yScale(d.count))
-    //     .attr("r", 1)
-    //     .attr("fill", "pink");
-
-    //Draw the area
+    // Draw the line
     svg.append("path")
         .datum(aggregatedData)
-        .attr("class", "area")
-        .attr("d", area)
-        .style("fill", "url(#gradient)")
-        .call(animatePath); 
-
-
-    //  // Draw the line to the area plot
-    //  svg.append("path")
-    // .datum(aggregatedData)
-    // .attr("class", "line")
-    // .attr("fill", "none")
-    // .attr("stroke", "#FF204E")
-    // .attr("stroke-width", 0.1)
-    // .attr("d", line);
-
-    //for daily views
-    // Draw the line
-    // svg.append("path")
-    // .datum(aggregatedData)
-    // .attr("class", "line")
-    // .attr("fill", "none")
-    // .attr("stroke", "#FF204E")
-    // .attr("stroke-width", 1)
-    // .attr("d", line);
-
-    // Draw the line
-    svg.append("path")
-        .datum(aggregatedData) // Use accumulatedData instead of aggregatedData for the line
         .attr("class", "line")
         .attr("fill", "none")
-        .attr("stroke", "#FF204E")
+        .attr("stroke", "url(#gradient)")
         .attr("stroke-width", 1)
         .attr("d", line)
         .call(animatePath); // Animate 'path'
