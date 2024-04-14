@@ -138,17 +138,15 @@ function generatePlot(data) {
         .attr("fill", "black") 
         .text(`Average: ${averageCount.toFixed(2)}`); 
 
-    // Add X axis
-    svg.append("g")
-        .attr("transform", `translate(0,${height})`)
-        .call(d3.axisBottom(xScale));
-
     // Add Y axis
     svg.append("g")
         .attr("transform", `translate(${width},0)`)
-        .call(d3.axisRight(yScale));  
-
-
+        .call(d3.axisRight(yScale).ticks(6));
+        
+    // Add X axis
+    svg.append("g")
+        .attr("transform", `translate(0,${height})`)
+        .call(d3.axisBottom(xScale).ticks(6));
 }
 
 function responsivefy(svg) {
