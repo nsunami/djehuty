@@ -71,7 +71,7 @@ function generatePlot(data, yAxisLabel, metric_parameter) {
         day: "numeric",
         };
  
-        // Set up scales
+    // Set up scales
     const xScale = d3.scaleTime()
         .domain(d3.extent(aggregatedData, d => d.date))
         .range([0, width]);
@@ -108,15 +108,6 @@ function generatePlot(data, yAxisLabel, metric_parameter) {
 
     const textContainer = d3.select("#text-container");
 
-    var text = svg.append("text")
-    .attr("x", 10) // Adjust the x position as needed
-    .attr("y", 20) // Adjust the y position as needed
-    .style("font-size", "12px") // Adjust font size as needed
-    .style("fill", "black"); // Adjust text color as needed
-
-    // Define line height
-    var lineHeight = 16;
-   
     // Add a circle element
     const circle = svg.append("circle")
         .attr("r", 0)
@@ -203,9 +194,13 @@ function generatePlot(data, yAxisLabel, metric_parameter) {
         // Add transition for the circle radius
         circle.transition()
         .duration(50)
-        .attr("r", 5); // originally 5 
+        .attr("r", 5); 
 
-        textContainer.html(`<br>total ${metric_parameter}: <strong>${d2.count !== undefined ? (d2.count).toFixed(0) : 'N/A'}</strong> &  daily ${metric_parameter}: <strong>${d1.count !== undefined ? (d1.count).toFixed(0) : 'N/A' } </strong> <br> on ${d.date.toLocaleDateString('en-GB', options)} `);
+        textContainer.html(`
+            <br>total ${metric_parameter}: <strong>${d2.count !== undefined ? (d2.count).toFixed(0) : 'N/A'}</strong> &  
+            daily ${metric_parameter}: <strong>${d1.count !== undefined ? (d1.count).toFixed(0) : 'N/A' } </strong> <br> 
+            on ${d.date.toLocaleDateString('en-GB', options)} 
+        `);
     });
 
     // listening rectangle mouse leave function

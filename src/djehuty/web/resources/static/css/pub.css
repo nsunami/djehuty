@@ -6,9 +6,6 @@
 #wrapper #content #doi:hover #container_doi { display: block }
 #wrapper #content #chart-container {background-color: #ffffff}
 #wrapper #content #chart-container:hover {background-color: #ffffff; display: block}
-#wrapper #content #chart-container rect rect { pointer-events: all; fill-opacity: 0; stroke-opacity: 0; z-index: 1;}
-#wrapper #content #chart-container .tooltip{ position: absolute; padding: 5px; background-color: rgb(11, 40, 65); color: white; border: 0px solid white; border-radius: 0px; display: none; opacity: .75; font-size: 14px;}
-#wrapper #content #chart-container .tooltip-line {stroke-opacity: 0.5;}
 #wrapper #content #text-container { font-family: Arial, sans-serif; font-size: 12px; color: #333; }
 #wrapper #content #text-container strong {font-weight: bold; color:#04AA6D; }
 #wrapper #content #type         { text-transform: uppercase; font-weight: bold }
@@ -21,10 +18,7 @@
 #wrapper #content .metric .number .button { border: none; color: white; padding: 8px 10px; text-align: center; text-decoration: none; display: inline-block; font-size: 12x; margin: 2px 2px; transition-duration: 0.4s; cursor: pointer;}
 #wrapper #content .metric .number .button1 { background-color: white; color: black;  border: 2px solid #04AA6D; }
 #wrapper #content .metric .number .button1:hover { background-color: #04AA6D;    color: white;}
-#wrapper #content .metric .number .button1.pressed {
-    background-color: #04AA6D;
-    color: white;
-}
+#wrapper #content .metric .number .button1.pressed { background-color: #04AA6D; color: white;}
 #wrapper #content #categories   { padding-top: 10px; clear: left }
 #wrapper #content #tags, #geo, #time_coverage, #dates, #collections, #peer, #references, #publisher, #format, #organizations,
 #wrapper #content #contributors, #funding, #usage, #derived_from, #same_as, #language, #licence, #export, #data_link
