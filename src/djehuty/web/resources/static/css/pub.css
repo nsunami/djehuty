@@ -10,7 +10,7 @@
 #wrapper #content #chart-container .tooltip{ position: absolute; padding: 5px; background-color: rgb(11, 40, 65); color: white; border: 0px solid white; border-radius: 0px; display: none; opacity: .75; font-size: 14px;}
 #wrapper #content #chart-container .tooltip-line {stroke-opacity: 0.5;}
 #wrapper #content #text-container { font-family: Arial, sans-serif; font-size: 12px; color: #333; }
-#wrapper #content #text-container strong {font-weight: bold; color: #555; }
+#wrapper #content #text-container strong {font-weight: bold; color:#04AA6D; }
 #wrapper #content #type         { text-transform: uppercase; font-weight: bold }
 #wrapper #content #metadata #versions { margin-top: 0px }
 #wrapper #content #description  { margin-top: 10px; padding:10px; border: 1px solid #666; border-radius: 10px }

@@ -51,7 +51,7 @@ function generatePlot(data, yAxisLabel, metric_parameter) {
 
 
     // Set the dimensions of the canvas
-    var margin = { top: 30, right: 50, bottom: 40, left: 20 },
+    var margin = { top: 30, right: 50, bottom: 40, left: 0 },
         width = 370 - margin.left - margin.right,
         height = 250 - margin.top - margin.bottom;
 
@@ -64,10 +64,14 @@ function generatePlot(data, yAxisLabel, metric_parameter) {
         .attr("transform",
             "translate(" + margin.left + "," + margin.top + ")");
 
-    
-    const container = d3.select(svg.node().parentNode);
-
-    // Set up scales
+    const options = {
+        // weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        };
+ 
+        // Set up scales
     const xScale = d3.scaleTime()
         .domain(d3.extent(aggregatedData, d => d.date))
         .range([0, width]);
@@ -201,20 +205,15 @@ function generatePlot(data, yAxisLabel, metric_parameter) {
         .duration(50)
         .attr("r", 5); // originally 5 
 
-        // textContainer.style("display", "block");
-    
-        textContainer.html(`<strong>date:</strong> ${d.date.toLocaleDateString('en-GB')}    <strong>total ${metric_parameter}:</strong> ${d2.count !== undefined ? (d2.count).toFixed(0) : 'N/A'}  <strong>daily ${metric_parameter}:</strong> ${d1.count !== undefined ? (d1.count).toFixed(0) : 'N/A' } `);
-
-        // text.html(`<tspan x="10" dy="${lineHeight}"><strong>Date:</strong> ${d.date.toLocaleDateString('en-GB')}</tspan>
-        // <tspan x="10" dy="${lineHeight}">${d2.count !== undefined ? `<strong>Total:</strong> ${(d2.count).toFixed(0)}` : ''}</tspan>
-        // <tspan x="10" dy="${lineHeight}">${d1.count !== undefined ? `<strong>Daily:</strong> ${(d1.count).toFixed(0)}` : ''}</tspan>`);
+        textContainer.html(`<br>total ${metric_parameter}: <strong>${d2.count !== undefined ? (d2.count).toFixed(0) : 'N/A'}</strong> &  daily ${metric_parameter}: <strong>${d1.count !== undefined ? (d1.count).toFixed(0) : 'N/A' } </strong> <br> on ${d.date.toLocaleDateString('en-GB', options)} `);
     });
+
     // listening rectangle mouse leave function
     listeningRect.on("mouseleave", function () {
         circle.transition()
         .duration(50)
         .attr("r", 0);
-        textContainer.html("");
+        textContainer.html("<br><br><br>");
         // textContainer.style("display", "none");
 });
 

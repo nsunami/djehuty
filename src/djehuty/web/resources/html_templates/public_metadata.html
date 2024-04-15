@@ -92,11 +92,11 @@
             <div class="metric">
                 <div class="number"><button class="button button1" onclick="toggleButton(this, '{{metric}}')"> {{statistics[metric]}}</button> </div>
                 {{metric.replace("cites", "citations")}}
-              
-            </div>      
+                
+            </div>              
     {% endfor %}
-    <div id="chart-container"></div>
-    <div id="text-container"></div>
+    <p> <br><br></p>  
+    <div id="chart-container"> <div id="text-container"></div></div>
             <script>             
                 let apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=2`; 
                 function updateMetricApi(metric) {
