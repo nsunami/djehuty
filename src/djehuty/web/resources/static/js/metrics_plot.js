@@ -102,12 +102,15 @@ function generatePlot(data, yAxisLabel) {
         .y0(height)
         .y1(d => yScale(d.count));
 
+    var text = svg.append("text")
+    .attr("x", 10) // Adjust the x position as needed
+    .attr("y", 20) // Adjust the y position as needed
+    .style("font-size", "12px") // Adjust font size as needed
+    .style("fill", "black"); // Adjust text color as needed
 
-    // Add tooltip
-    var tooltip = d3.select("#chart-container").append("div")
-    .attr("class", "tooltip")
-    .style("opacity", 1);
-            
+    // Define line height
+    var lineHeight = 16;
+   
     // Add a circle element
     const circle = svg.append("circle")
         .attr("r", 0)
@@ -196,22 +199,16 @@ function generatePlot(data, yAxisLabel) {
         .duration(50)
         .attr("r", 5); // originally 5 
 
-        // add in  our tooltip
-        tooltip
-        .style("display", "block")
-        .style("left", `${xPos + container.node().getBoundingClientRect().width * 1.25}px`) 
-        .style("top", `${yPos + container.node().getBoundingClientRect().height * 0.6}px`) 
-        .call(responsivefy, container)
-        .html(`<strong>Date:</strong> ${d.date.toLocaleDateString('en-GB')}<br><strong>Total:</strong> ${d2.count !== undefined ? (d2.count).toFixed(0) : 'N/A'} <br> <strong>Daily:</strong> ${d1.count !== undefined ? (d1.count).toFixed(0) : 'N/A' } `)
-    });
     
+        text.html(`<tspan x="10" dy="${lineHeight}"><strong>Date:</strong> ${d.date.toLocaleDateString('en-GB')}</tspan>
+        <tspan x="10" dy="${lineHeight}">${d2.count !== undefined ? `<strong>Total:</strong> ${(d2.count).toFixed(0)}` : ''}</tspan>
+        <tspan x="10" dy="${lineHeight}">${d1.count !== undefined ? `<strong>Daily:</strong> ${(d1.count).toFixed(0)}` : ''}</tspan>`);
+    });
     // listening rectangle mouse leave function
     listeningRect.on("mouseleave", function () {
         circle.transition()
         .duration(50)
         .attr("r", 0);
-
-    tooltip.style("display", "none");
 });
 
     // Text label for the average count
