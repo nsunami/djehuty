@@ -96,15 +96,18 @@
             </div>      
     {% endfor %}
     <div id="chart-container"></div>
+    <div id="text-container"></div>
             <script>             
                 let apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=2`; 
                 function updateMetricApi(metric) {
                     if (metric === "views") {
                         apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=1`;
                         yAxisLabel = "Daily Views"; // Set the x-axis label for views
+                        metric_parameter = "views";
                     } else if (metric === "downloads") {
                        apiUrl = `/v3/log-entry/search/{{item.container_uuid}}?event_type=2`;
                        yAxisLabel = "Daily Downloads"; // Set the x-axis label for downloads
+                       metric_parameter = "downloads";
                     } else {
                         d3.select("#chart-container").selectAll("svg").remove();
                         return;
@@ -113,7 +116,7 @@
                     // load latest API data and through processData re-create plot
                     d3.json(apiUrl)
                     .then(function (data) {
-                        generatePlot(data, yAxisLabel);
+                        generatePlot(data, yAxisLabel, metric_parameter);
                         })
                     .catch(function (error) {
                         console.error("Error fetching data: " + error);

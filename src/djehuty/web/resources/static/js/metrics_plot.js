@@ -1,4 +1,4 @@
-function generatePlot(data, yAxisLabel) {
+function generatePlot(data, yAxisLabel, metric_parameter) {
 
     d3.select("#chart-container").selectAll("svg").remove();
 
@@ -79,7 +79,7 @@ function generatePlot(data, yAxisLabel) {
     // .range([height, 0]);
 
     
-// Create the average count line
+    // Create the average count line
     svg.append("line")
         .attr("x1", 0) 
         .attr("x2", width) 
@@ -101,6 +101,8 @@ function generatePlot(data, yAxisLabel) {
         .x(d => xScale(d.date))
         .y0(height)
         .y1(d => yScale(d.count));
+
+    const textContainer = d3.select("#text-container");
 
     var text = svg.append("text")
     .attr("x", 10) // Adjust the x position as needed
@@ -199,16 +201,21 @@ function generatePlot(data, yAxisLabel) {
         .duration(50)
         .attr("r", 5); // originally 5 
 
+        // textContainer.style("display", "block");
     
-        text.html(`<tspan x="10" dy="${lineHeight}"><strong>Date:</strong> ${d.date.toLocaleDateString('en-GB')}</tspan>
-        <tspan x="10" dy="${lineHeight}">${d2.count !== undefined ? `<strong>Total:</strong> ${(d2.count).toFixed(0)}` : ''}</tspan>
-        <tspan x="10" dy="${lineHeight}">${d1.count !== undefined ? `<strong>Daily:</strong> ${(d1.count).toFixed(0)}` : ''}</tspan>`);
+        textContainer.html(`<strong>date:</strong> ${d.date.toLocaleDateString('en-GB')}    <strong>total ${metric_parameter}:</strong> ${d2.count !== undefined ? (d2.count).toFixed(0) : 'N/A'}  <strong>daily ${metric_parameter}:</strong> ${d1.count !== undefined ? (d1.count).toFixed(0) : 'N/A' } `);
+
+        // text.html(`<tspan x="10" dy="${lineHeight}"><strong>Date:</strong> ${d.date.toLocaleDateString('en-GB')}</tspan>
+        // <tspan x="10" dy="${lineHeight}">${d2.count !== undefined ? `<strong>Total:</strong> ${(d2.count).toFixed(0)}` : ''}</tspan>
+        // <tspan x="10" dy="${lineHeight}">${d1.count !== undefined ? `<strong>Daily:</strong> ${(d1.count).toFixed(0)}` : ''}</tspan>`);
     });
     // listening rectangle mouse leave function
     listeningRect.on("mouseleave", function () {
         circle.transition()
         .duration(50)
         .attr("r", 0);
+        textContainer.html("");
+        // textContainer.style("display", "none");
 });
 
     // Text label for the average count
