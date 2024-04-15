@@ -934,8 +934,8 @@ class ApiServer:
         record["item_type"]       = self.get_parameter (request, "item_type")
         record["doi"]             = self.get_parameter (request, "doi")
         record["handle"]          = self.get_parameter (request, "handle")
-        record["search_for"]      = self.parse_search_terms(self.get_parameter (request, "search_for"))
-        record["search_format"]   = self.get_parameter (request, "search_format")
+        record["search_for"]      = self.get_parameter (request, "search_for")
+        record["search_filters"]  = self.get_parameter (request, "search_filters")
         record["categories"]      = split_delimited_string(self.get_parameter (request, "categories"), ",")
         record["is_latest"]       = self.get_parameter (request, "is_latest")
 
@@ -953,13 +953,9 @@ class ApiServer:
         validator.integer_value (record, "item_type")
         validator.string_value  (record, "doi",             maximum_length=255)
         validator.string_value  (record, "handle",          maximum_length=255)
-        validator.boolean_value (record, "search_format")
+        validator.string_value  (record, "search_for",      maximum_length=1024)
         validator.boolean_value (record, "is_latest")
-
-        try:
-            validator.string_value (record, "search_for",      maximum_length=1024)
-        except validator.InvalidValueType:
-            validator.array_value  (record, "search_for" )
+        validator.search_filters(record["search_filters"])
 
         if "categories" in record and record["categories"] is not None:
             for category_id in record["categories"]:
@@ -8037,85 +8033,6 @@ class ApiServer:
                     contr_dict['orcid'] = parts[1][:-1]
                 contributors.append(contr_dict)
         return contributors
-
-    def parse_search_terms (self, search_for):
-        """Procedure to parse search terms and operators in a string"""
-        if not isinstance(search_for, str):
-            return search_for
-
-        search_for = search_for.strip()
-        operators_mapping = {"(":"(", ")":")", "AND":"&&", "OR":"||"}
-        operators = operators_mapping.keys()
-
-        fields = ["title", "resource_title", "description",
-                  "format", "tag", "organizations"]
-        re_field = ":(" + "|".join(fields+["search_term"]) + "):"
-
-        search_tokens = re.findall(r'[^" ]+|"[^"]+"|\([^)]+\)', search_for)
-        search_tokens = [s.strip('"') for s in search_tokens]
-        has_operators = any((operator in search_for) for operator in operators)
-        has_fieldsearch = re.search(re_field, search_for) is not None
-
-        # Concatenate field name and its following token as one token.
-        for idx, token in enumerate(search_tokens):
-            if token is None:
-                continue
-            if re.search(re_field, token) is not None:
-                matched = re.split(':', token)[1::2][0]
-                if matched in fields:
-                    try:
-                        search_tokens[idx] = f"{token} {search_tokens[idx+1]}"
-                        search_tokens[idx+1] = None
-                    except IndexError:
-                        return search_for
-
-        search_tokens = [x for x in search_tokens if x is not None]
-
-        ## Unpacking this construction to replace AND and OR for &&
-        ## and || results in a query where && is stripped out.
-        if has_operators:
-            is_parenthesized = False
-            lparen_count = search_tokens.count("(")
-            rparen_count = search_tokens.count(")")
-            if lparen_count > 0 and lparen_count == rparen_count:
-                is_parenthesized = True
-            for idx, element in enumerate(search_tokens):
-                if element in operators:
-                    if element in ['(', ')'] and not is_parenthesized:
-                        continue
-                    search_tokens[idx] = {"operator": operators_mapping[element]}
-        else:
-            # No operators found in the search query. Adding OR operators.
-            index = -1
-            while len(search_tokens) + index > 0:
-                search_tokens.insert(index, {"operator": "||"})
-                index = index - 2
-
-        for idx, search_term in enumerate(search_tokens):
-            if isinstance(search_term, dict):
-                continue
-
-            if re.search(re_field, search_term) is not None:
-                field_name = re.split(':', search_term)[1::2][0]
-                value = list(filter(None, [s.strip() for s in re.split(':', search_term)[0::2]]))[0]
-
-                if field_name in fields:
-                    search_tokens[idx] = {field_name: value}
-                elif field_name == "search_term":
-                    search_dict = {}
-                    for field_name in fields:
-                        search_dict[field_name] = value
-                    search_tokens[idx] = search_dict
-
-                field_name = None
-
-            elif has_fieldsearch is False:
-                search_dict = {}
-                for field in fields:
-                    search_dict[field] = search_term
-                search_tokens[idx] = search_dict
-
-        return search_tokens
 
     def add_names_to_authors (self, authors):
         """Procedure to add missing first_name and last_name to author dict"""

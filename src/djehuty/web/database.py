@@ -298,73 +298,52 @@ class SparqlInterface:
 
         return self.__run_query (query)
 
-    def __search_query_to_sparql_filters (self, search_for, search_format):
+    def __search_query_to_sparql_filters (self, search_for, search_filters):
         """
-        Procedure to parse search queries and return SPARQL FILTER statements.
+        Procedure to convert search queries to SPARQL FILTER statements.
         """
 
         filters = ""
-        if search_for is None:
+        if search_for is None or not isinstance (search_filters, dict):
             return filters
 
-        if isinstance (search_for, str):
-            # turn into list for loop purposes
-            search_for = [search_for]
-        if dict in list(map(type, search_for)):
+        operator = "&&"
+        search_words = search_for.split()
+        if len(search_words) == 0:
+            return filters
+
+        self.log.info("length of search words: %s", len(search_words))
+
+        fields = []
+        if "scopes" in search_filters:
+            fields += search_filters["scopes"]
+        if "formats" in search_filters:
+            fields += search_filters["formats"]
+        if "operator" in search_filters:
+            if search_filters["operator"] == "or":
+                operator = "||"
+
+        if isinstance (fields, list) and len(fields) > 0:
             filters += "FILTER ("
-            last_used_field = None
-            for element in search_for:
-                if (isinstance (element, dict)
-                    and len(element.items()) == 1
-                    and next(iter(element)) == "operator"):
-                    if element['operator'] == "(":
-                        filters += " ( "
-                        continue
-                    if element['operator'] == ")":
-                        filters += " ) "
-                    filters += f" {element['operator']} "
-                # This is a case that a search term comes after field search
-                # :tag: maize processing -> tag:maize || tag:processing
-                # :tag: maize AND processing -> tag:maize && tag:processing
-                elif isinstance (element, str):
-                    if last_used_field is None:
-                        continue
-                    escaped_value = rdf.escape_string_value (element.lower())
-                    filters += f"CONTAINS(LCASE(?{last_used_field}), {escaped_value})\n"
+            for field in fields:
+                if not isinstance (field, str):
                     continue
-                else:
-                    filter_list = []
-                    for key, value in element.items():
-                        if value == "":
-                            continue
-                        escaped_value = rdf.escape_string_value (value.lower())
-                        filter_list.append(f"CONTAINS(LCASE(?{key}), {escaped_value})\n")
-                        last_used_field = key
-                    if filter_list:
-                        filters += (f"({' || '.join(filter_list)})")
-            filters += ")"
 
-            # Post-construction heuristical query fixing
-            # It's undocumented because it needs to be replaced.
-            filters = filters.replace("FILTER ( || ", "FILTER (")
-            filters = filters.replace(")CONTAINS", ") || CONTAINS")
-            filters = filters.replace(")\nCONTAINS", ") || CONTAINS")
-            filters = filters.replace(")(", ") || (")
-            filters = filters.replace(")  )", ")")
-        else:
-            filter_list = []
-            for search_term in search_for:
-                search_term_safe = rdf.escape_string_value (search_term.lower())
+                filters_tmp = ""
+                for word in search_words:
+                    escaped_word = rdf.escape_string_value (word.lower())
+                    filters_tmp += f"CONTAINS(LCASE(?{field}), {escaped_word}) {operator} "
+                filters_tmp = "(" + filters_tmp[:-4] + ") || "
+                filters += filters_tmp
 
-                # should be the same as ApiServer.ui_search()'s fields.
-                fields = ["title", "resource_title", "description", "tag", "organizations"]
-                for field in fields:
-                    filter_list.append(f"       CONTAINS(LCASE(?{field}),          {search_term_safe})")
+            filters = filters[:-4]
+            filters += ")\n"
 
-                if search_format:
-                    filter_list.append(f"       CONTAINS(LCASE(?format),         {search_term_safe})")
-            if len(filter_list) > 0:
-                filters += f"FILTER({' || '.join(filter_list)})"
+        if "organization" in search_filters:
+            organization = search_filters["organization"]
+            if isinstance (organization, str) and organization != "":
+                escaped_org = rdf.escape_string_value (organization.lower())
+                filters = f"FILTER(CONTAINS(LCASE(?organization), {escaped_org}))\n"
 
         return filters
 
@@ -373,7 +352,7 @@ class SparqlInterface:
                   exclude_ids=None, groups=None, handle=None, institution=None,
                   is_latest=False, item_type=None, limit=None, modified_since=None,
                   offset=None, order=None, order_direction=None, published_since=None,
-                  resource_doi=None, return_count=False, search_for=None, search_format=False,
+                  resource_doi=None, return_count=False, search_for=None, search_filters=None,
                   version=None, is_published=True, is_under_review=None, git_uuid=None,
                   private_link_id_string=None, use_cache=True, is_restricted=None,
                   is_embargoed=None, is_software=None):
@@ -394,8 +373,7 @@ class SparqlInterface:
         filters += rdf.sparql_filter ("private_link_id_string", private_link_id_string, escape=True)
         filters += rdf.sparql_in_filter ("group_id",    groups)
         filters += rdf.sparql_in_filter ("dataset_id", exclude_ids, negate=True)
-        filters += self.__search_query_to_sparql_filters (search_for, search_format)
-
+        filters += self.__search_query_to_sparql_filters (search_for, search_filters)
         if is_software is not None:
             if is_software:
                 filters += rdf.sparql_filter ("defined_type_name", "software", escape=True)
