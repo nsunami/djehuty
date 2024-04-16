@@ -44,6 +44,7 @@ class SparqlInterface:
         self.group_quotas   = {}
         self.default_quota  = 5000000000
         self.store          = None
+        self.disable_collaboration = True
 
     def setup_sparql_endpoint (self):
         """Procedure to be called after setting the 'endpoint' members."""
@@ -140,20 +141,25 @@ class SparqlInterface:
 
     def __normalize_orcid (self, orcid):
         """Procedure to make storing ORCID identifiers consistent."""
-        # Don't store empty ORCID identifiers.
-        if orcid == "":
-            orcid = None
-        # Strip the URI prefix from ORCID identifiers.
-        elif not isinstance(orcid, str):
+        # Don't process invalid entries
+        if not isinstance(orcid, str):
             return None
-        elif orcid.startswith ("https://orcid.org/"):
-            orcid = orcid[18:]
+        # Don't store empty ORCID identifiers.
+        orcid = orcid.strip()
+        if orcid == "":
+            return None
+        # Strip the URI prefix from ORCID identifiers.
+        if orcid.startswith ("https://orcid.org/"):
+            return orcid[18:]
 
         return orcid
 
     def __query_from_template (self, name, args=None):
         template   = self.jinja.get_template (f"{name}.sparql")
-        parameters = { "state_graph": self.state_graph }
+        parameters = {
+            "state_graph":           self.state_graph,
+            "disable_collaboration": self.disable_collaboration
+        }
         if args is None:
             args = {}
 
@@ -210,6 +216,7 @@ class SparqlInterface:
                 self.sparql_is_up = True
 
         except HTTPError as error:
+            self.sparql.rollback()
             if error.code == 503:
                 if retries > 0:
                     self.log.warning ("Retrying SPARQL request due to service unavailability (%s)",
@@ -221,11 +228,6 @@ class SparqlInterface:
 
             self.log.error ("SPARQL endpoint returned %d:\n---\n%s\n---",
                             error.code, error.reason)
-
-            # Bad request. Usually a syntax error in the query.
-            if error.code == 400:
-                self.sparql.rollback()
-                self.log.error ("Transaction of the failed query has been rolled back.")
 
             return []
         except URLError:
@@ -316,10 +318,10 @@ class SparqlInterface:
                     and len(element.items()) == 1
                     and next(iter(element)) == "operator"):
                     if element['operator'] == "(":
-                        filters += " || "
+                        filters += " ( "
                         continue
                     if element['operator'] == ")":
-                        continue
+                        filters += " ) "
                     filters += f" {element['operator']} "
                 # This is a case that a search term comes after field search
                 # :tag: maize processing -> tag:maize || tag:processing
@@ -345,14 +347,17 @@ class SparqlInterface:
             # Post-construction heuristical query fixing
             # It's undocumented because it needs to be replaced.
             filters = filters.replace("FILTER ( || ", "FILTER (")
+            filters = filters.replace(")CONTAINS", ") || CONTAINS")
+            filters = filters.replace(")\nCONTAINS", ") || CONTAINS")
             filters = filters.replace(")(", ") || (")
+            filters = filters.replace(")  )", ")")
         else:
             filter_list = []
             for search_term in search_for:
                 search_term_safe = rdf.escape_string_value (search_term.lower())
 
                 # should be the same as ApiServer.ui_search()'s fields.
-                fields = ["title", "resource_title", "description", "citation", "tag"]
+                fields = ["title", "resource_title", "description", "tag", "organizations"]
                 for field in fields:
                     filter_list.append(f"       CONTAINS(LCASE(?{field}),          {search_term_safe})")
 
@@ -362,7 +367,6 @@ class SparqlInterface:
                 filters += f"FILTER({' || '.join(filter_list)})"
 
         return filters
-
 
     def datasets (self, account_uuid=None, categories=None, collection_uri=None,
                   container_uuid=None, dataset_id=None, dataset_uuid=None, doi=None,
@@ -410,7 +414,7 @@ class SparqlInterface:
         if modified_since is not None:
             modified_since_safe = rdf.escape_datetime_value (modified_since)
             filters += rdf.sparql_bound_filter ("modified_date")
-            filters += f"FILTER (?modified_date > {modified_since_safe})\n"
+            filters += f"FILTER (STR(?modified_date) > STR({modified_since_safe}))\n"
 
         query = self.__query_from_template ("datasets", {
             "categories":     categories,
@@ -439,20 +443,35 @@ class SparqlInterface:
 
         return self.__run_query (query)
 
+    def datasets_missing_dois (self):
+        """Procedure to retrieve datasets where a DOI registration went wrong."""
+        query = self.__query_from_template ("datasets_missing_dois")
+        return self.__run_query (query)
+
+    def repository_file_statistics (self, extended_properties=False, use_cache=False):
+        """Returns files and their sizes, and optionally more properties."""
+        query = self.__query_from_template ("statistics_files", {
+            "extended_properties": extended_properties
+        })
+
+        if use_cache:
+            return self.__run_query (query, query, "repository_statistics")
+
+        return self.__run_query (query)
+
     def repository_statistics (self):
         """Procedure to retrieve repository-wide statistics."""
 
         datasets_query    = self.__query_from_template ("statistics_datasets")
         collections_query = self.__query_from_template ("statistics_collections")
         authors_query     = self.__query_from_template ("statistics_authors")
-        files_query       = self.__query_from_template ("statistics_files")
 
         row = { "datasets": 0, "authors": 0, "collections": 0, "files": 0, "bytes": 0 }
         try:
             datasets    = self.__run_query (datasets_query, datasets_query, "repository_statistics")
             authors     = self.__run_query (authors_query, authors_query, "repository_statistics")
             collections = self.__run_query (collections_query, collections_query, "repository_statistics")
-            files       = self.__run_query (files_query, files_query, "repository_statistics")
+            files       = self.repository_file_statistics (use_cache=True)
             number_of_files = 0
             number_of_bytes = 0
             for entry in files:
@@ -1270,9 +1289,64 @@ class SparqlInterface:
 
         return None, None
 
+    def insert_quota_request (self, account_uuid, requested_size, reason):
+        """Procedure to create a quota request."""
+
+        if account_uuid is None or requested_size is None:
+            return None
+
+        graph        = Graph()
+        uri          = rdf.unique_node ("quota-request")
+        account_uri  = rdf.uuid_to_uri (account_uuid, "account")
+        current_time = datetime.strftime (datetime.now(), "%Y-%m-%dT%H:%M:%S")
+
+        graph.add ((uri, RDF.type,      rdf.DJHT["QuotaRequest"]))
+        rdf.add (graph, uri, rdf.DJHT["account"], account_uri, "uri")
+        rdf.add (graph, uri, rdf.DJHT["requested_size"], requested_size, XSD.integer)
+        rdf.add (graph, uri, rdf.DJHT["reason"], reason, XSD.string)
+        rdf.add (graph, uri, rdf.DJHT["created_date"], current_time, XSD.dateTime)
+        rdf.add (graph, uri, rdf.DJHT["status"], rdf.DJHT["QuotaRequestUnresolved"], "uri")
+
+        if self.add_triples_from_graph (graph):
+            return rdf.uri_to_uuid (uri)
+
+        return None
+
+    def update_quota_request (self, quota_request_uuid, requested_size=None,
+                              reason=None, status=None):
+        """Procedure to update a quota request."""
+
+        status_uri = None
+        if status is not None:
+            status_uri = rdf.DJHT[f"QuotaRequest{status.capitalize()}"]
+
+        query = self.__query_from_template ("update_quota_request", {
+            "quota_request_uuid": quota_request_uuid,
+            "requested_size": requested_size,
+            "reason": reason,
+            "status": None if status_uri is None else rdf.urify_value (status_uri),
+            "assign_to_account": status == "approved"
+        })
+
+        self.cache.invalidate_by_prefix ("accounts")
+        return self.__run_logged_query (query)
+
+    def quota_requests (self, status=None, quota_request_uuid=None):
+        """Procedure to return a list of quota requests."""
+
+        status_uri = None
+        if status is not None:
+            status_uri = rdf.urify_value (rdf.DJHT[f"QuotaRequest{status.capitalize()}"])
+
+        query = self.__query_from_template ("quota_requests", {
+            "status": status_uri,
+            "quota_request_uuid": quota_request_uuid
+        })
+        return self.__run_query (query)
+
     def update_account (self, account_uuid, active=None, email=None, job_title=None,
                         first_name=None, last_name=None, institution_user_id=None,
-                        institution_id=None, pending_quota_request=None,
+                        institution_id=None,
                         maximum_file_size=None, modified_date=None, created_date=None,
                         location=None, biography=None, categories=None, twitter=None,
                         linkedin=None, website=None, profile_image=None):
@@ -1300,7 +1374,6 @@ class SparqlInterface:
             "biography":             rdf.escape_string_value (biography),
             "institution_user_id":   institution_user_id,
             "institution_id":        institution_id,
-            "pending_quota_request": pending_quota_request,
             "maximum_file_size":     maximum_file_size,
             "profile_image":         profile_image,
             "modified_date":         modified_date,
@@ -1586,6 +1659,10 @@ class SparqlInterface:
         rdf.add (graph, file_uri, rdf.DJHT["upload_url"],    upload_url,    XSD.string)
         rdf.add (graph, file_uri, rdf.DJHT["upload_token"],  upload_token,  XSD.string)
 
+        current_time = datetime.strftime (datetime.now(), "%Y-%m-%dT%H:%M:%S")
+        rdf.add (graph, file_uri, rdf.DJHT["created_date"],  current_time,  XSD.dateTime)
+        rdf.add (graph, file_uri, rdf.DJHT["modified_date"], current_time,  XSD.dateTime)
+
         self.cache.invalidate_by_prefix ("datasets")
         if account_uuid:
             self.cache.invalidate_by_prefix (f"datasets_{account_uuid}")
@@ -1633,6 +1710,7 @@ class SparqlInterface:
                      is_incomplete=None, is_image=None):
         """Procedure to update file metadata."""
 
+        modified_date = datetime.strftime (datetime.now(), "%Y-%m-%dT%H:%M:%SZ")
         query   = self.__query_from_template ("update_file", {
             "account_uuid":  account_uuid,
             "file_uuid":     file_uuid,
@@ -1644,6 +1722,7 @@ class SparqlInterface:
             "file_size":     file_size,
             "is_incomplete": is_incomplete,
             "is_image":      rdf.escape_boolean_value (is_image),
+            "modified_date": modified_date,
             "status":        status
         })
 
@@ -1674,6 +1753,25 @@ class SparqlInterface:
 
         return False
 
+    def item_collaborative_permissions (self, item_type, item_uuid,
+                                        collaborator_account_uuid):
+        """
+        Returns the permissions of a collaborator with ACCOUNT_UUID for dataset
+        or collection identified by ITEM_UUID.
+        """
+
+        query = self.__query_from_template ("item_collaborative_permissions", {
+            "item_type": item_type,
+            "item_uuid": item_uuid,
+            "account_uuid": collaborator_account_uuid
+        })
+
+        rows = self.__run_query (query)
+        if rows:
+            return rows[0]
+
+        return None
+
     def collaborators (self, dataset_uuid, account_uuid=None):
         "Get list of collaborators of a dataset"
         query = self.__query_from_template("collaborators", {
@@ -1697,6 +1795,7 @@ class SparqlInterface:
         rdf.add (graph, collaborator_uri, rdf.DJHT["data_read"],     data_read,     XSD.boolean)
         rdf.add (graph, collaborator_uri, rdf.DJHT["data_edit"],     data_edit,     XSD.boolean)
         rdf.add (graph, collaborator_uri, rdf.DJHT["data_remove"],   data_remove,   XSD.boolean)
+        rdf.add (graph, collaborator_uri, rdf.DJHT["item"],          rdf.uuid_to_uri(dataset_uuid, "dataset"), "uri")
         rdf.add (graph, collaborator_uri, rdf.DJHT["account"],       rdf.uuid_to_uri(collaborator_uuid, "account"),  "uri")
 
         if self.add_triples_from_graph (graph):
@@ -1736,7 +1835,8 @@ class SparqlInterface:
         self.cache.invalidate_by_prefix("datasets")
         return self.__run_logged_query (query)
 
-    def insert_private_link (self, item_uuid, account_uuid, whom=None, purpose=None, item_type=None,
+    def insert_private_link (self, item_uuid, account_uuid, whom=None,
+                             purpose=None, item_type=None, anonymize=False,
                              read_only=True, id_string=None,
                              is_active=True, expires_date=None):
         """Procedure to add a private link to the state graph."""
@@ -1757,6 +1857,7 @@ class SparqlInterface:
         rdf.add (graph, link_uri, rdf.DJHT["is_active"],    is_active)
         rdf.add (graph, link_uri, rdf.DJHT["expires_date"], expires_date, XSD.dateTime)
         rdf.add (graph, link_uri, rdf.DJHT["whom"], whom,  XSD.string)
+        rdf.add (graph, link_uri, rdf.DJHT["anonymize"], anonymize,  XSD.boolean)
         rdf.add (graph, link_uri, rdf.DJHT["purpose"], purpose,  XSD.string)
 
         if self.add_triples_from_graph (graph):
@@ -1875,12 +1976,14 @@ class SparqlInterface:
 
         collection_uuid = draft["uuid"]
         blank_node   = self.wrap_in_blank_node (collection_uuid, "collection")
+        current_time = datetime.strftime (datetime.now(), "%Y-%m-%dT%H:%M:%SZ")
         query        = self.__query_from_template ("publish_draft_collection", {
             "account_uuid":      account_uuid,
             "blank_node":        blank_node,
             "version":           new_version_number,
             "container_uuid":    container_uuid,
             "collection_uuid":   collection_uuid,
+            "timestamp":         current_time,
             "first_publication": not latest
         })
 
@@ -1993,11 +2096,13 @@ class SparqlInterface:
 
         dataset_uuid = draft["uuid"]
         blank_node   = self.wrap_in_blank_node (dataset_uuid, "dataset")
+        current_time = datetime.strftime (datetime.now(), "%Y-%m-%dT%H:%M:%SZ")
         query        = self.__query_from_template ("publish_draft_dataset", {
             "blank_node":        blank_node,
             "version":           new_version_number,
             "container_uuid":    container_uuid,
             "dataset_uuid":      dataset_uuid,
+            "timestamp":         current_time,
             "first_publication": not latest
         })
 
@@ -2268,6 +2373,15 @@ class SparqlInterface:
         self.cache.invalidate_by_prefix (f"datasets_{account_uuid}")
         self.cache.invalidate_by_prefix ("datasets")
         return self.__run_query(query)
+
+    def dataset_update_doi_after_publishing (self, dataset_uuid, doi):
+        """Procedure to update a DOI after it has been published."""
+
+        query = self.__query_from_template ("update_doi_after_publishing", {
+            "dataset_uuid": dataset_uuid,
+            "doi": rdf.escape_string_value (doi)
+        })
+        return self.__run_logged_query (query)
 
     def insert_collection (self, title,
                            account_uuid,
@@ -2719,11 +2833,14 @@ class SparqlInterface:
 
         return None
 
-    def account_quota (self, email, domain):
+    def account_quota (self, email, domain, account):
         """Return the account's quota in bytes."""
 
         account_quota = self.account_quotas.get (email)
         group_quota   = self.group_quotas.get (domain)
+
+        if "quota" in account:
+            return account["quota"]
 
         if account_quota:
             return account_quota
@@ -2743,7 +2860,7 @@ class SparqlInterface:
                 privileges = self.privileges[email]
 
             domain     = conv.value_or (account, "domain", "")
-            quota      = self.account_quota (email, domain)
+            quota      = self.account_quota (email, domain, account)
             account    = { **account, **privileges, "quota": quota }
         except (TypeError, KeyError):
             pass
@@ -3055,6 +3172,11 @@ class SparqlInterface:
     def may_review_quotas (self, session_token, account=None):
         """Returns True when the session's account may handle storage requests."""
         return self.__may_execute_role (session_token, "review_quotas", account)
+
+    def may_review_integrity (self, session_token, account=None):
+        """Returns True when the session's account may view data integrity information."""
+        return (self.__may_execute_role (session_token, "administer", account) and
+                self.__may_execute_role (session_token, "review_integrity", account))
 
     def is_depositor (self, session_token):
         """Returns True when the account linked to the session is a depositor, False otherwise"""

@@ -1,6 +1,7 @@
 """This module implements the entire HTTP interface for users."""
 
 from datetime import date, datetime, timedelta
+from urllib.parse import quote, unquote
 from io import StringIO
 import os.path
 import os
@@ -35,8 +36,8 @@ from djehuty.utils.convenience import pretty_print_size, decimal_coords
 from djehuty.utils.convenience import value_or, value_or_none, deduplicate_list
 from djehuty.utils.convenience import self_or_value_or_none, parses_to_int
 from djehuty.utils.convenience import make_citation, is_opendap_url, landing_page_url
-from djehuty.utils.convenience import split_author_name
-from djehuty.utils.constants import group_to_member, member_url_names
+from djehuty.utils.convenience import split_author_name, split_delimited_string
+from djehuty.utils.constants import group_to_member, member_url_names, filetypes_by_extension
 from djehuty.utils.rdf import uuid_to_uri, uri_to_uuid, uris_from_records
 
 ## Error handling for loading python3-saml is done in 'ui'.
@@ -61,6 +62,8 @@ class ApiServer:
         self.base_url         = f"http://{address}:{port}"
         self.site_name        = ""
         self.site_description = ""
+        self.site_shorttag    = ""
+        self.support_email_address = ""
         self.db               = database.SparqlInterface()  # pylint: disable=invalid-name
         self.email            = email_handler.EmailInterface()
         self.cookie_key       = "djehuty_session"
@@ -95,6 +98,10 @@ class ApiServer:
 
         self.saml_config_path    = None
         self.saml_config         = None
+        self.saml_attribute_email = "urn:mace:dir:attribute-def:mail"
+        self.saml_attribute_first_name = "urn:mace:dir:attribute-def:givenName"
+        self.saml_attribute_last_name = "urn:mace:dir:attribute-def:sn"
+        self.saml_attribute_common_name = "urn:mace:dir:attribute-def:cn"
 
         self.datacite_url        = None
         self.datacite_id         = None
@@ -105,6 +112,13 @@ class ApiServer:
         self.log                 = logging.getLogger(__name__)
         self.locks               = locks.Locks()
         self.menu = []
+        self.colors = {
+            "primary-color":           "#f49120",
+            "primary-color-hover":     "#d26000",
+            "primary-color-active":    "#9d4800",
+            "privilege-button-color":  "#fce3bf",
+            "footer-background-color": "#707070"
+        }
         self.static_pages = {}
 
         ## Routes to all reachable pages and API calls.
@@ -114,11 +128,12 @@ class ApiServer:
             ## ----------------------------------------------------------------
             ## UI
             ## ----------------------------------------------------------------
-            # The / used to redirect to /portal, but here we reversed it.
-            R("/",                                                               self.ui_portal),
-            R("/portal",                                                         self.ui_home),
+            R("/",                                                               self.ui_home),
+            R("/portal",                                                         self.ui_redirect_to_home),
+            R("/browse",                                                         self.ui_redirect_to_home),
             R("/robots.txt",                                                     self.robots_txt),
-            R("/browse",                                                         self.ui_home),
+            R("/theme/colors.css",                                               self.colors_css),
+            R("/theme/loader.svg",                                               self.loader_svg),
             R("/login",                                                          self.ui_login),
             R("/account/home",                                                   self.ui_account_home),
             R("/logout",                                                         self.ui_logout),
@@ -151,9 +166,12 @@ class ApiServer:
             R("/review/assign-to-me/<dataset_id>",                               self.ui_review_assign_to_me),
             R("/review/unassign/<dataset_id>",                                   self.ui_review_unassign),
             R("/review/published/<dataset_id>",                                  self.ui_review_published),
+            R("/admin/approve-quota-request/<quota_request_uuid>",               self.ui_admin_approve_quota_request),
             R("/admin/dashboard",                                                self.ui_admin_dashboard),
+            R("/admin/deny-quota-request/<quota_request_uuid>",                  self.ui_admin_deny_quota_request),
             R("/admin/users",                                                    self.ui_admin_users),
             R("/admin/exploratory",                                              self.ui_admin_exploratory),
+            R("/admin/quota-requests",                                           self.ui_admin_quota_requests),
             R("/admin/sparql",                                                   self.ui_admin_sparql),
             R("/admin/reports",                                                  self.ui_admin_reports),
             R("/admin/reports/restricted_datasets",                              self.ui_admin_reports_restricted_datasets),
@@ -162,6 +180,7 @@ class ApiServer:
             R("/admin/maintenance",                                              self.ui_admin_maintenance),
             R("/admin/maintenance/clear-cache",                                  self.ui_admin_clear_cache),
             R("/admin/maintenance/clear-sessions",                               self.ui_admin_clear_sessions),
+            R("/admin/maintenance/repair-doi-registrations",                     self.ui_admin_repair_doi_registrations),
             R("/admin/maintenance/recalculate-statistics",                       self.ui_admin_recalculate_statistics),
             R("/categories/<category_id>",                                       self.ui_categories),
             R("/category",                                                       self.ui_category),
@@ -345,12 +364,20 @@ class ApiServer:
             ## ----------------------------------------------------------------
             R("/v3/datasets/<dataset_uuid>/assign-reviewer/<reviewer_uuid>",     self.api_v3_datasets_assign_reviewer),
 
+            ## Administrative
+            ## ----------------------------------------------------------------
+            R("/v3/admin/files-integrity-statistics",                            self.api_v3_admin_files_integrity_statistics),
+            R("/v3/admin/accounts/clear-cache",                                  self.api_v3_admin_accounts_clear_cache),
+
             ## ----------------------------------------------------------------
             ## GIT HTTP API
             ## ----------------------------------------------------------------
+            R("/v3/datasets/<git_uuid>.git",                                     self.api_v3_private_dataset_git_instructions),
             R("/v3/datasets/<git_uuid>.git/info/refs",                           self.api_v3_private_dataset_git_refs),
             R("/v3/datasets/<git_uuid>.git/git-upload-pack",                     self.api_v3_private_dataset_git_upload_pack),
             R("/v3/datasets/<git_uuid>.git/git-receive-pack",                    self.api_v3_private_dataset_git_receive_pack),
+            R("/v3/datasets/<git_uuid>.git/languages",                           self.api_v3_dataset_git_languages),
+            R("/v3/datasets/<git_uuid>.git/contributors",                        self.api_v3_dataset_git_contributors),
 
             ## ----------------------------------------------------------------
             ## SHARED SUBMIT INTERFACE API
@@ -473,6 +500,10 @@ class ApiServer:
         template = self.jinja.get_template (template_name)
         return self.response (template.render (context), mimetype="image/svg+xml")
 
+    def __render_css_template (self, template_name, **context):
+        template = self.jinja.get_template (template_name)
+        return self.response (template.render (context), mimetype="text/css")
+
     def __render_template (self, request, template_name, **context):
         template      = self.jinja.get_template (template_name)
         token         = self.token_from_cookie (request)
@@ -482,6 +513,7 @@ class ApiServer:
             "base_url":        self.base_url,
             "site_name":       self.site_name,
             "site_description": self.site_description,
+            "site_shorttag":   self.site_shorttag,
             "small_footer":    self.small_footer,
             "large_footer":    self.large_footer,
             "path":            request.path,
@@ -496,6 +528,8 @@ class ApiServer:
             "is_logged_in":    account is not None,
             "is_reviewing":    self.db.may_review (impersonator_token),
             "may_review":      self.db.may_review (token, account),
+            "may_review_integrity": self.db.may_review_integrity (token, account),
+            "may_review_quotas": self.db.may_review_quotas (token, account),
             "may_administer":  self.db.may_administer (token, account),
             "may_query":       self.db.may_query (token, account),
             "may_impersonate":  self.db.may_impersonate (token, account),
@@ -566,6 +600,7 @@ class ApiServer:
         if not email_addresses or not self.email.is_properly_configured ():
             return False
 
+        failure_count = 0
         for email_address in email_addresses:
             if not self.db.may_receive_email_notifications (email_address):
                 self.log.info ("Did not send e-mail to '%s' due to settings.", email_address)
@@ -574,7 +609,12 @@ class ApiServer:
             text, html = self.__render_email_templates (f"email/{template_name}",
                                                         recipient_email=email_address,
                                                         **context)
-            self.email.send_email (email_address, subject, text, html)
+            if not self.email.send_email (email_address, subject, text, html):
+                failure_count += 1
+
+        if failure_count > 0:
+            self.log.info ("Failed to send e-mail to %d out of %d address(es): %s", failure_count, len(email_addresses), subject)
+            return False
 
         self.log.info ("Sent e-mail to %d address(es): %s", len(email_addresses), subject)
         return True
@@ -685,18 +725,15 @@ class ApiServer:
         response.status_code = 410
         return response
 
-    def error_413 (self, request, quota_available=0, quota_total=None, quota_used=None, uploading_size=None):
+    def error_413 (self, request):
         """Procedure to respond with HTTP 413."""
         response = None
-        message = "Your storage space is insufficient. Please check your storage usage and quota on the dashboard. "
-        message += f"(quota={quota_total}, used={quota_used}, available={quota_available}, your file={uploading_size})."
+        message  = "You've reached your storage quota. "
+        message += "<a href=\"/my/dashboard\">Request more storage here</a>."
         if self.accepts_json (request):
-            response = self.response (json.dumps({
-                "message": message
-            }))
+            response = self.response (json.dumps({ "message": message }))
         else:
-            response = self.response (message,
-                                      mimetype="text/plain")
+            response = self.response (message, mimetype="text/plain")
         response.status_code = 413
         return response
 
@@ -788,25 +825,22 @@ class ApiServer:
             if version is not None and not parses_to_int (version):
                 return None
 
+            parameters = {
+                "is_published": is_published,
+                "is_latest": is_latest,
+                "is_under_review": is_under_review,
+                "version": version,
+                "account_uuid": account_uuid,
+                "use_cache": use_cache,
+                "limit": 1
+            }
             dataset = None
             if parses_to_int (identifier):
-                dataset = self.db.datasets (dataset_id   = int(identifier),
-                                            is_published = is_published,
-                                            is_latest    = is_latest,
-                                            is_under_review = is_under_review,
-                                            version      = version,
-                                            account_uuid = account_uuid,
-                                            use_cache    = use_cache,
-                                            limit        = 1)[0]
+                dataset = self.db.datasets (dataset_id = int(identifier),
+                                            **parameters)[0]
             elif validator.is_valid_uuid (identifier):
                 dataset = self.db.datasets (container_uuid = identifier,
-                                            is_published   = is_published,
-                                            is_latest      = is_latest,
-                                            is_under_review = is_under_review,
-                                            version        = version,
-                                            account_uuid   = account_uuid,
-                                            use_cache      = use_cache,
-                                            limit          = 1)[0]
+                                            **parameters)[0]
 
             return dataset
 
@@ -820,23 +854,21 @@ class ApiServer:
             if version is not None and not parses_to_int (version):
                 return None
 
+            parameters = {
+                "is_published": is_published,
+                "is_latest": is_latest,
+                "version": version,
+                "account_uuid": account_uuid,
+                "use_cache": use_cache,
+                "limit": 1
+            }
             collection = None
             if parses_to_int (identifier):
                 collection = self.db.collections (collection_id = int(identifier),
-                                                  is_published  = is_published,
-                                                  is_latest     = is_latest,
-                                                  version       = version,
-                                                  account_uuid  = account_uuid,
-                                                  use_cache     = use_cache,
-                                                  limit         = 1)[0]
+                                                  **parameters)[0]
             elif validator.is_valid_uuid (identifier):
                 collection = self.db.collections (container_uuid = identifier,
-                                                  is_published   = is_published,
-                                                  is_latest      = is_latest,
-                                                  version        = version,
-                                                  account_uuid   = account_uuid,
-                                                  use_cache      = use_cache,
-                                                  limit          = 1)[0]
+                                                  **parameters)[0]
 
             return collection
 
@@ -848,23 +880,50 @@ class ApiServer:
                               dataset_uri=None,
                               private_view=False):
         try:
+            parameters = {
+                "dataset_uri": dataset_uri,
+                "account_uuid": account_uuid,
+                "private_view": private_view
+            }
             file = None
             if parses_to_int (identifier):
-                file = self.db.dataset_files (file_id     = int(identifier),
-                                              dataset_uri = dataset_uri,
-                                              account_uuid = account_uuid,
-                                              private_view = private_view)
+                file = self.db.dataset_files (file_id = int(identifier), **parameters)
             elif (validator.is_valid_uuid (identifier) or
                   validator.is_valid_uuid (uri_to_uuid (dataset_uri))):
-                file = self.db.dataset_files (file_uuid   = identifier,
-                                              dataset_uri = dataset_uri,
-                                              account_uuid = account_uuid,
-                                              private_view = private_view)
+                file = self.db.dataset_files (file_uuid = identifier, **parameters)
 
             return file
 
         except IndexError:
             return None
+
+    def __needs_collaborative_permissions (self, account_uuid, request,
+                                           item_type, item, permissions):
+        """Returns a Response when insufficient permissions, None otherwise."""
+        if not value_or (item, "is_shared_with_me", False):
+            return None, None
+
+        if "uuid" not in item:
+            self.log.error ("Expected a 'uuid' property in 'item'. Assuming no permission.")
+            return None, self.error_403 (request)
+
+        record = self.db.item_collaborative_permissions (item_type, item["uuid"], account_uuid)
+        if not permissions:
+            self.log.error ("Could not find permissions for %s on %s",
+                            account_uuid, item["uuid"])
+            return None, self.error_403 (request)
+
+        # Provide syntatic leniency for a single permission
+        if isinstance (permissions, str):
+            permissions = [ permissions ]
+
+        for permission in permissions:
+            if not value_or (record, permission, False):
+                self.log.error ("Account %s attempted action requiring '%s' on %s.",
+                                account_uuid, permission, item["uuid"])
+                return None, self.error_403 (request)
+
+        return record, None
 
     def __file_by_id_or_uri (self, identifier,
                              account_uuid=None,
@@ -898,7 +957,9 @@ class ApiServer:
         record["item_type"]       = self.get_parameter (request, "item_type")
         record["doi"]             = self.get_parameter (request, "doi")
         record["handle"]          = self.get_parameter (request, "handle")
-        record["search_for"]      = self.get_parameter (request, "search_for")
+        record["search_for"]      = self.parse_search_terms(self.get_parameter (request, "search_for"))
+        record["search_format"]   = self.get_parameter (request, "search_format")
+        record["categories"]      = split_delimited_string(self.get_parameter (request, "categories"), ",")
         record["is_latest"]       = self.get_parameter (request, "is_latest")
 
         offset, limit = self.__paging_offset_and_limit (request)
@@ -915,8 +976,17 @@ class ApiServer:
         validator.integer_value (record, "item_type")
         validator.string_value  (record, "doi",             maximum_length=255)
         validator.string_value  (record, "handle",          maximum_length=255)
-        validator.string_value  (record, "search_for",      maximum_length=1024)
+        validator.boolean_value (record, "search_format")
         validator.boolean_value (record, "is_latest")
+
+        try:
+            validator.string_value (record, "search_for",      maximum_length=1024)
+        except validator.InvalidValueType:
+            validator.array_value  (record, "search_for" )
+
+        if "categories" in record and record["categories"] is not None:
+            for category_id in record["categories"]:
+                validator.integer_value (record, "category_id", category_id)
 
         # Rewrite the group parameter to match the database's plural form.
         record["groups"]  = [record["group"]] if record["group"] is not None else None
@@ -1144,10 +1214,10 @@ class ApiServer:
         attributes           = saml_auth.get_attributes()
         record["session"]    = session
         try:
-            record["email"]      = attributes["urn:mace:dir:attribute-def:mail"][0]
-            record["first_name"] = attributes["urn:mace:dir:attribute-def:givenName"][0]
-            record["last_name"]  = attributes["urn:mace:dir:attribute-def:sn"][0]
-            record["common_name"] = attributes["urn:mace:dir:attribute-def:cn"][0]
+            record["email"]      = attributes[self.saml_attribute_email][0]
+            record["first_name"] = attributes[self.saml_attribute_first_name][0]
+            record["last_name"]  = attributes[self.saml_attribute_last_name][0]
+            record["common_name"] = attributes[self.saml_attribute_common_name][0]
         except (KeyError, IndexError):
             self.log.error ("Didn't receive expected fields in SAMLResponse.")
             self.log.error ("Received attributes: %s", attributes)
@@ -1162,7 +1232,8 @@ class ApiServer:
     def saml_metadata (self, request):
         """Communicates the service provider metadata for SAML 2.0."""
 
-        if not self.accepts_xml (request):
+        if not (self.accepts_content_type (request, "application/samlmetadata+xml") or
+                self.accepts_xml (request)):
             return self.error_406 ("text/xml")
 
         if self.identity_provider != "saml":
@@ -1357,7 +1428,7 @@ class ApiServer:
     ## API CALLS
     ## ------------------------------------------------------------------------
 
-    def ui_home (self, request):
+    def ui_redirect_to_home (self, request):
         """Implements /."""
         if self.accepts_html (request):
             return redirect ("/", code=301)
@@ -1374,6 +1445,29 @@ class ApiServer:
             output += "Disallow: /\n"
 
         return self.response (output, mimetype="text/plain")
+
+    def colors_css (self, request):
+        """Implements /theme/colors.css."""
+
+        if not self.accepts_content_type (request, "text/css", strict=False):
+            return self.error_406 ("text/css")
+
+        return self.__render_css_template (
+            "colors.css",
+            primary_color           = self.colors['primary-color'],
+            primary_color_hover     = self.colors['primary-color-hover'],
+            primary_color_active    = self.colors['primary-color-active'],
+            footer_background_color = self.colors['footer-background-color'],
+            privilege_button_color  = self.colors['privilege-button-color'])
+
+    def loader_svg (self, request):
+        """Implements /theme/loader.svg."""
+
+        if not self.accepts_content_type (request, "image/svg+xml", strict=False):
+            return self.error_406 ("image/svg+xml")
+
+        return self.__render_svg_template ("loader.svg",
+            primary_color = self.colors["primary-color"])
 
     def ui_maintenance (self, request):
         """Implements a maintenance page."""
@@ -1793,9 +1887,10 @@ class ApiServer:
             if dataset is None:
                 return self.error_403 (request)
 
-            if not (not value_or (dataset, "is_shared_with_me", False) or
-                    value_or (dataset, "metadata_read", False)):
-                return self.error_403 (request)
+            permissions, error_response = self.__needs_collaborative_permissions (
+                account_uuid, request, "dataset", dataset, "metadata_read")
+            if error_response is not None:
+                return error_response
 
             # Pre-Djehuty datasets may not have a Git UUID. We therefore
             # assign one when needed.
@@ -1823,6 +1918,7 @@ class ApiServer:
                 container_uuid = dataset["container_uuid"],
                 disable_collaboration = self.disable_collaboration,
                 article    = dataset,
+                permissions = permissions,
                 account    = account,
                 categories = categories,
                 groups     = groups)
@@ -1845,10 +1941,6 @@ class ApiServer:
                                                    is_published=False)
 
             if dataset is None:
-                return self.error_403 (request)
-
-            if not (not value_or (dataset, "is_shared_with_me", False) or
-                    value_or (dataset, "metadata_remove", False)):
                 return self.error_403 (request)
 
             container_uuid = dataset["container_uuid"]
@@ -2232,9 +2324,11 @@ class ApiServer:
             return self.error_403 (request)
 
         if request.method == "GET":
-            if not (not value_or (dataset, "is_shared_with_me", False) or
-                    value_or (dataset, "metadata_read", False)):
-                return self.error_403 (request)
+
+            _, error_response = self.__needs_collaborative_permissions (
+                account_uuid, request, "dataset", dataset, "metadata_read")
+            if error_response is not None:
+                return error_response
 
             collaborators = self.db.collaborators (dataset["uuid"])
             return self.default_list_response (collaborators, formatter.format_collaborator_record)
@@ -2321,9 +2415,10 @@ class ApiServer:
                                         is_latest=None,
                                         limit=1)[0]
 
-            if not (not value_or (dataset, "is_shared_with_me", False) or
-                    value_or (dataset, "metadata_edit", False)):
-                return self.error_403 (request)
+            _, error_response = self.__needs_collaborative_permissions (
+                account_uuid, request, "dataset", dataset, "metadata_edit")
+            if error_response is not None:
+                return error_response
 
             if self.db.remove_collaborator (dataset["uuid"], collaborator_uuid) is None:
                 return self.error_500()
@@ -2363,6 +2458,8 @@ class ApiServer:
             try:
                 whom         = validator.string_value (request.form, "whom", 0, 128)
                 purpose      = validator.string_value (request.form, "purpose", 0, 128)
+                anonymize    = validator.string_value (request.form, "anonymize_link", 0, 2)
+                anonymize    = bool(anonymize == "on")
                 current_time = datetime.now()
                 options      = ["1 day", "7 days", "30 days", "indefinitely"]
                 expires_date = validator.options_value (request.form, "expires_date",
@@ -2382,7 +2479,7 @@ class ApiServer:
                 self.locks.lock (locks.LockTypes.PRIVATE_LINKS)
                 self.db.insert_private_link (dataset["uuid"], account_uuid, whom=whom,
                                              purpose=purpose, expires_date=delta,
-                                             item_type="dataset")
+                                             anonymize=anonymize, item_type="dataset")
                 self.locks.unlock (locks.LockTypes.PRIVATE_LINKS)
                 return redirect (f"/my/datasets/{dataset_uuid}/private_links", code=302)
             except validator.ValidationException as error:
@@ -2637,6 +2734,59 @@ class ApiServer:
         return self.__render_template (request, "review/published.html",
                                        container_uuid=dataset["container_uuid"])
 
+    def __process_quota_request (self, request, quota_request_uuid, status):
+        token = self.token_from_cookie (request)
+        if not self.db.may_review_quotas (token):
+            return self.error_403 (request)
+
+        if not validator.is_valid_uuid (quota_request_uuid):
+            return self.error_400 (request, "Invalid quota request UUID.",
+                                   "InvalidQuotaRequestUUIError")
+
+        if self.db.update_quota_request (quota_request_uuid, status = status):
+            if status == "approved":
+                try:
+                    record = self.db.quota_requests (quota_request_uuid=quota_request_uuid)[0]
+                    subject = "Quota request approved"
+                    requested_size = int(record["requested_size"] / 1000000000)
+                    self.__send_templated_email ([record["email"]],
+                                                 subject,
+                                                 "quota_approved",
+                                                 title          = subject,
+                                                 email_address  = record["email"],
+                                                 first_name     = record["first_name"],
+                                                 requested_size = requested_size,
+                                                 base_url       = self.base_url,
+                                                 support_email  = self.support_email_address)
+                except (IndexError, KeyError):
+                    self.log.error ("Unable to send e-mail for quota request %s.",
+                                    quota_request_uuid)
+            return redirect ("/admin/quota-requests", code=302)
+
+        return self.error_500 ()
+
+    def ui_admin_approve_quota_request (self, request, quota_request_uuid):
+        """Implements /admin/approve-quota-request/<id>."""
+        return self.__process_quota_request (request, quota_request_uuid, "approved")
+
+    def ui_admin_deny_quota_request (self, request, quota_request_uuid):
+        """Implements /admin/approve-quota-request/<id>."""
+        return self.__process_quota_request (request, quota_request_uuid, "denied")
+
+    def ui_admin_quota_requests (self, request):
+        """Implements /admin/quota-requests."""
+
+        if not self.accepts_html (request):
+            return self.error_406 ("text/html")
+
+        token = self.token_from_cookie (request)
+        if not self.db.may_review_quotas (token):
+            return self.error_403 (request)
+
+        quota_requests = self.db.quota_requests (status="unresolved")
+        return self.__render_template (request, "admin/quota_requests.html",
+                                       quota_requests = quota_requests)
+
     def ui_admin_dashboard (self, request):
         """Implements /admin/dashboard."""
         if not self.accepts_html (request):
@@ -2747,7 +2897,9 @@ class ApiServer:
         if not self.db.may_administer (token):
             return self.error_403 (request)
 
-        return self.__render_template (request, "admin/maintenance.html")
+        missing_doi_datasets = self.db.datasets_missing_dois ()
+        return self.__render_template (request, "admin/maintenance.html",
+                                       missing_dois = len(missing_doi_datasets))
 
     def ui_admin_clear_cache (self, request):
         """Implements /admin/maintenance/clear-cache."""
@@ -2758,6 +2910,39 @@ class ApiServer:
             return self.respond_204 ()
 
         return self.error_403 (request)
+
+    def ui_admin_repair_doi_registrations (self, request):
+        """Implements /admin/maintenance/repair-doi-registrations."""
+        token = self.token_from_cookie (request)
+        if not self.db.may_administer (token):
+            return self.error_403 (request)
+
+        datasets = self.db.datasets_missing_dois ()
+        if datasets:
+            self.log.info ("Repairing %s missing DOI registrations.", len(datasets))
+            error_count = 0
+            for dataset in datasets:
+                if not self.__update_item_doi (dataset["container_uuid"],
+                                               item_type  = "dataset",
+                                               version    = dataset["version"],
+                                               from_draft = False):
+                    error_count += 1
+                    self.log.error ("Registering DOI for publication of %s failed.",
+                                    dataset["container_uuid"])
+                    continue
+
+                doi = self.__standard_doi (dataset["container_uuid"],
+                                           version = dataset["version"])
+                if not self.db.dataset_update_doi_after_publishing (dataset["uuid"], doi):
+                    self.log.error ("Updating the DOI '%s' in the database failed for %s.",
+                                    doi, dataset["uuid"])
+
+            if error_count == 0:
+                return self.respond_204 ()
+
+            return self.error_500 ()
+
+        return self.respond_204 ()
 
     def ui_admin_recalculate_statistics (self, request):
         """Implements /admin/maintenance/recalculate-statistics."""
@@ -2847,7 +3032,7 @@ class ApiServer:
 
         return self.error_405 (["GET", "POST"])
 
-    def ui_portal (self, request):
+    def ui_home (self, request):
         """Implements /portal."""
         if not self.accepts_html (request):
             return self.error_406 ("text/html")
@@ -2946,7 +3131,8 @@ class ApiServer:
 
             self.__log_event (request, dataset["container_uuid"], "dataset", "privateView")
             return self.ui_dataset (request, dataset["container_uuid"],
-                                    dataset=dataset, private_view=True)
+                                    dataset=dataset, private_view=True,
+                                    anonymize=value_or(dataset, "anonymize", False))
         except IndexError:
             pass
 
@@ -2977,7 +3163,7 @@ class ApiServer:
         """Implements backward-compatibility landing page URLs for datasets."""
         return self.ui_dataset (request, dataset_id, version)
 
-    def ui_dataset (self, request, dataset_id, version=None, dataset=None, private_view=False):
+    def ui_dataset (self, request, dataset_id, version=None, dataset=None, private_view=False, anonymize=False):
         """Implements /datasets/<id>."""
 
         handler = self.default_error_handling (request, "GET", "text/html")
@@ -3119,6 +3305,7 @@ class ApiServer:
                                        my_email=my_email,
                                        my_name=my_name,
                                        is_own_item=is_own_item,
+                                       anonymize=anonymize,
                                        page_title=f"{dataset['title']} ({defined_type_name})")
 
     def ui_data_access_request (self, request):
@@ -3138,11 +3325,15 @@ class ApiServer:
 
             dataset = self.db.datasets (container_uuid=dataset_id, version=version)[0]
 
-            if not value_or_none(dataset, 'is_confidential'):
+            if not value_or_none(dataset, 'is_confidential') and not (not value_or_none(dataset, 'embargo_until_date') and value_or_none(dataset, 'embargo_type')):
                 self.log.warning ("Not allowed. Dataset %s is not confidential", dataset_id)
                 return self.error_403 (request)
 
-            doi = dataset['doi']
+            # When in pre-production state, don't mind about DOI.
+            doi = value_or_none(dataset, 'doi')
+            if doi is None and self.in_production and not self.in_preproduction:
+                self.log.error ("Dataset %s does not have a DOI", dataset_id)
+                return self.error_403 (request)
             title = dataset['title']
             contact_info = self.db.contact_info_from_container(dataset_id)
             addresses = self.db.reviewer_email_addresses()
@@ -3167,6 +3358,8 @@ class ApiServer:
             return self.respond_204 ()
         except (validator.ValidationException, KeyError):
             pass
+        except IndexError:
+            return self.error_400 (request, "Dataset does not exist", 400)
 
         return self.error_500 ()
 
@@ -3567,9 +3760,12 @@ class ApiServer:
                 dataset["title"] = f"{dataset['title'][:126]}>"
 
             safe_title = dataset["title"].replace('"', '')
-            filename = f'"{safe_title}_{version}_all.zip"'
-
+            safe_title_ascii = safe_title.encode('ascii', 'ignore').decode('ascii')
+            filename = f'"{safe_title_ascii}_{version}_all.zip"'
             response.headers["Content-disposition"] = f"attachment; filename={filename}"
+            if safe_title != safe_title_ascii:
+                filename_utf8 = f"{quote(safe_title)}_{version}_all.zip"
+                response.headers["Content-disposition"] += f"; filename*=UTF-8''{filename_utf8}"
 
             if self.__is_reviewing (request):
                 self.__log_event (request, dataset["container_uuid"], "dataset", "reviewerDownload")
@@ -3596,98 +3792,10 @@ class ApiServer:
                 search_for = ""
 
         search_for = search_for.strip()
-        operators_mapping = {"(":"(", ")":")", "AND":"&&", "OR":"||"}
-        operators = operators_mapping.keys()
-
-        fields = ["title", "resource_title", "description", "citation", "format", "tag"]
-        re_field = ":(" + "|".join(fields+["search_term"]) + "):"
-
-        search_tokens = re.findall(r'[^" ]+|"[^"]+"|\([^)]+\)', search_for)
-        search_tokens = [s.strip('"') for s in search_tokens]
-        has_operators = any((operator in search_for) for operator in operators)
-        has_fieldsearch = re.search(re_field, search_for) is not None
-
-        # Concatenate field name and its following token as one token.
-        for idx, token in enumerate(search_tokens):
-            if token is None:
-                continue
-            if re.search(re_field, token) is not None:
-                matched = re.split(':', token)[1::2][0]
-                if matched in fields:
-                    try:
-                        search_tokens[idx] = f"{token} {search_tokens[idx+1]}"
-                        search_tokens[idx+1] = None
-                    except IndexError:
-                        return self.error_400 (request, "Field name used without search term", 400)
-
-        search_tokens = [x for x in search_tokens if x is not None]
-
-        ## Unpacking this construction to replace AND and OR for &&
-        ## and || results in a query where && is stripped out.
-        if has_operators:
-            is_parenthesized = False
-            lparen_count = search_tokens.count("(")
-            rparen_count = search_tokens.count(")")
-            if lparen_count > 0 and lparen_count == rparen_count:
-                is_parenthesized = True
-            for idx, element in enumerate(search_tokens):
-                if element in operators:
-                    if element in ['(', ')'] and not is_parenthesized:
-                        continue
-                    search_tokens[idx] = {"operator": operators_mapping[element]}
-        else:
-            # No operators found in the search query. Adding OR operators.
-            index = -1
-            while len(search_tokens) + index > 0:
-                search_tokens.insert(index, {"operator": "||"})
-                index = index - 2
-
-        display_list = search_tokens[:]
-        for idx, search_term in enumerate(search_tokens):
-            if isinstance(search_term, dict):
-                continue
-
-            if re.search(re_field, search_term) is not None:
-                field_name = re.split(':', search_term)[1::2][0]
-                value = list(filter(None, [s.strip() for s in re.split(':', search_term)[0::2]]))[0]
-
-                if field_name in fields:
-                    search_tokens[idx] = {field_name: value}
-                elif field_name == "search_term":
-                    search_dict = {}
-                    for field_name in fields:
-                        search_dict[field_name] = value
-                    search_tokens[idx] = search_dict
-
-                field_name = None
-
-            elif has_fieldsearch is False:
-                search_dict = {}
-                for field in fields:
-                    search_dict[field] = search_term
-                search_tokens[idx] = search_dict
-
-        dataset_count = self.db.datasets (search_for=search_tokens,
-                                          is_published=True,
-                                          is_latest=True,
-                                          return_count=True)
-        if dataset_count == []:
-            message = "Invalid query"
-            datasets = []
-            dataset_count = 0
-        else:
-            message = None
-            dataset_count = dataset_count[0]["datasets"]
-            datasets = self.db.datasets (search_for=search_tokens,
-                                         is_published=True,
-                                         is_latest=True,
-                                         limit=100)
+        categories = self.db.categories(limit=None)
         return self.__render_template (request, "search.html",
                                        search_for=search_for,
-                                       articles=datasets,
-                                       dataset_count=dataset_count,
-                                       message=message,
-                                       display_terms=display_list,
+                                       categories=categories,
                                        page_title=f"{search_for} (search)")
 
     def api_authorize (self, request):
@@ -3814,10 +3922,6 @@ class ApiServer:
 
         try:
             dataset         = self.__dataset_by_id_or_uri (dataset_id, account_uuid=None, is_latest=True)
-
-            if not (not value_or (dataset, "is_shared_with_me", False) or
-                    value_or (dataset, "metadata_read", False)):
-                return self.error_403 (request)
 
             # Passing along the base_url here to generate the API links.
             dataset["base_url"] = self.base_url
@@ -4082,9 +4186,10 @@ class ApiServer:
                 if dataset_uri is None:
                     return self.response ("[]")
 
-                if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "metadata_read", False)):
-                    return self.error_403 (request)
+                _, error_response = self.__needs_collaborative_permissions (
+                    account_uuid, request, "dataset", dataset, "metadata_read")
+                if error_response is not None:
+                    return error_response
 
                 dataset["doi"]  = self.__standard_doi (dataset["container_uuid"],
                                                        version = None,
@@ -4138,9 +4243,10 @@ class ApiServer:
                 if dataset is None:
                     return self.error_403 (request)
 
-                if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "metadata_edit", False)):
-                    return self.error_403 (request)
+                _, error_response = self.__needs_collaborative_permissions (
+                    account_uuid, request, "dataset", dataset, "metadata_edit")
+                if error_response is not None:
+                    return error_response
 
                 is_embargoed = validator.boolean_value (record, "is_embargoed", when_none=False)
                 embargo_options = validator.array_value (record, "embargo_options")
@@ -4209,10 +4315,6 @@ class ApiServer:
                                                            account_uuid=account_uuid,
                                                            is_published=False)
 
-                if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "metadata_remove", False)):
-                    return self.error_403 (request)
-
                 container_uuid = dataset["container_uuid"]
                 if self.db.delete_dataset_draft (container_uuid, dataset["uuid"], account_uuid):
                     return self.respond_204()
@@ -4238,9 +4340,10 @@ class ApiServer:
                                                        account_uuid=account_uuid,
                                                        is_published=False)
 
-                if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "metadata_read", False)):
-                    return self.error_403 (request)
+                _, error_response = self.__needs_collaborative_permissions (
+                    account_uuid, request, "dataset", dataset, "metadata_read")
+                if error_response is not None:
+                    return error_response
 
                 authors = self.db.authors (item_uri   = dataset["uri"],
                                            account_uuid = account_uuid,
@@ -4267,9 +4370,10 @@ class ApiServer:
                 if dataset is None:
                     return self.error_403 (request)
 
-                if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "metadata_edit", False)):
-                    return self.error_403 (request)
+                _, error_response = self.__needs_collaborative_permissions (
+                    account_uuid, request, "dataset", dataset, "metadata_edit")
+                if error_response is not None:
+                    return error_response
 
                 new_authors = []
                 records     = parameters["authors"]
@@ -4346,9 +4450,10 @@ class ApiServer:
             if dataset is None:
                 return self.error_403 (request)
 
-            if not (not value_or (dataset, "is_shared_with_me", False) or
-                    value_or (dataset, "metadata_edit", False)):
-                return self.error_403 (request)
+            _, error_response = self.__needs_collaborative_permissions (
+                account_uuid, request, "dataset", dataset, "metadata_edit")
+            if error_response is not None:
+                return error_response
 
             authors = self.db.authors (item_uri     = dataset["uri"],
                                        account_uuid = account_uuid,
@@ -4391,9 +4496,10 @@ class ApiServer:
                 if item is None:
                     return self.error_403 (request)
 
-                if not (not value_or (item, "is_shared_with_me", False) or
-                        value_or (item, "metadata_read", False)):
-                    return self.error_403 (request)
+                _, error_response = self.__needs_collaborative_permissions (
+                    account_uuid, request, item_type, item, "metadata_read")
+                if error_response is not None:
+                    return error_response
 
                 funding = self.db.fundings (item_uri     = item["uri"],
                                             account_uuid = account_uuid,
@@ -4420,9 +4526,10 @@ class ApiServer:
                 if item is None:
                     return self.error_403 (request)
 
-                if not (not value_or (item, "is_shared_with_me", False) or
-                        value_or (item, "metadata_edit", False)):
-                    return self.error_403 (request)
+                _, error_response = self.__needs_collaborative_permissions (
+                    account_uuid, request, item_type, item, "metadata_edit")
+                if error_response is not None:
+                    return error_response
 
                 new_fundings = []
                 records     = parameters["funders"]
@@ -4504,9 +4611,10 @@ class ApiServer:
             if item is None:
                 return self.error_403 (request)
 
-            if not (not value_or (item, "is_shared_with_me", False) or
-                    value_or (item, "metadata_remove", False)):
-                return self.error_403 (request)
+            _, error_response = self.__needs_collaborative_permissions (
+                account_uuid, request, item_type, item, "metadata_edit")
+            if error_response is not None:
+                return error_response
 
             fundings = self.db.fundings (item_uri     = item["uri"],
                                          account_uuid = account_uuid,
@@ -4602,10 +4710,8 @@ class ApiServer:
 
             self.log.error ("Failed to delete dataset %s from collection %s.",
                             dataset_id, collection_id)
-            return self.error_500 ()
         except (IndexError, KeyError) as error:
             self.log.error ("Failed to delete dataset from collection: %s", error)
-            return self.error_500 ()
 
         return self.error_403 (request)
 
@@ -4648,9 +4754,10 @@ class ApiServer:
                                                        account_uuid = account_uuid,
                                                        is_published = False)
 
-                if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "metadata_edit", False)):
-                    return self.error_403 (request)
+                _, error_response = self.__needs_collaborative_permissions (
+                    account_uuid, request, "dataset", dataset, "metadata_edit")
+                if error_response is not None:
+                    return error_response
 
                 # First, validate all values passed by the user.
                 # This way, we can be as certain as we can be that performing
@@ -4719,9 +4826,10 @@ class ApiServer:
             if not dataset:
                 return self.response ("[]")
 
-            if not (not value_or (dataset, "is_shared_with_me", False) or
-                    value_or (dataset, "metadata_read", False)):
-                return self.error_403 (request)
+            _, error_response = self.__needs_collaborative_permissions (
+                account_uuid, request, "dataset", dataset, "metadata_read")
+            if error_response is not None:
+                return error_response
 
             return self.response (json.dumps (formatter.format_dataset_embargo_record (dataset)))
 
@@ -4731,9 +4839,10 @@ class ApiServer:
                                                        account_uuid = account_uuid,
                                                        is_published = False)
 
-                if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "metadata_remove", False)):
-                    return self.error_403 (request)
+                _, error_response = self.__needs_collaborative_permissions (
+                    account_uuid, request, "dataset", dataset, "metadata_edit")
+                if error_response is not None:
+                    return error_response
 
                 if self.db.delete_dataset_embargo (dataset_uri = dataset["uri"],
                                                    account_uuid = account_uuid):
@@ -4761,9 +4870,10 @@ class ApiServer:
                 if dataset is None:
                     return self.error_403 (request)
 
-                if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "data_read", False)):
-                    return self.error_403 (request)
+                _, error_response = self.__needs_collaborative_permissions (
+                    account_uuid, request, "dataset", dataset, "data_read")
+                if error_response is not None:
+                    return error_response
 
                 files = self.db.dataset_files (
                     dataset_uri = dataset["uri"],
@@ -4825,9 +4935,10 @@ class ApiServer:
                 if dataset is None:
                     return self.error_403 (request)
 
-                if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "data_edit", False)):
-                    return self.error_403 (request)
+                _, error_response = self.__needs_collaborative_permissions (
+                    account_uuid, request, "dataset", dataset, "data_edit")
+                if error_response is not None:
+                    return error_response
 
                 if link is not None:
                     file_id = self.db.insert_file (
@@ -4885,9 +4996,10 @@ class ApiServer:
                 if dataset is None:
                     return self.error_404 (request)
 
-                if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "data_read", False)):
-                    return self.error_403 (request)
+                _, error_response = self.__needs_collaborative_permissions (
+                    account_uuid, request, "dataset", dataset, "data_read")
+                if error_response is not None:
+                    return error_response
 
                 metadata = self.__file_by_id_or_uri (file_id,
                                                      account_uuid = account_uuid,
@@ -4911,9 +5023,10 @@ class ApiServer:
                 if dataset is None:
                     return self.error_403 (request)
 
-                if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "data_remove", False)):
-                    return self.error_403 (request)
+                _, error_response = self.__needs_collaborative_permissions (
+                    account_uuid, request, "dataset", dataset, "data_remove")
+                if error_response is not None:
+                    return error_response
 
                 metadata = self.__file_by_id_or_uri (file_id,
                                                      account_uuid = account_uuid,
@@ -5223,9 +5336,10 @@ class ApiServer:
         if dataset is None:
             return self.error_403 (request)
 
-        if not (not value_or (dataset, "is_shared_with_me", False) or
-                value_or (dataset, "metadata_edit", False)):
-            return self.error_403 (request)
+        _, error_response = self.__needs_collaborative_permissions (
+            account_uuid, request, "dataset", dataset, "metadata_edit")
+        if error_response is not None:
+            return error_response
 
         reserved_doi = self.__reserve_and_save_doi (account_uuid, dataset)
         if reserved_doi:
@@ -6204,8 +6318,9 @@ class ApiServer:
             self.log.error ("No Git repository for dataset %s.", dataset_id)
             return None
 
-        if not (not value_or (dataset, "is_shared_with_me", False) or
-                value_or (dataset, f"data_{action}", False)):
+        _, error_response = self.__needs_collaborative_permissions (
+            account_uuid, None, "dataset", dataset, f"data_{action}")
+        if error_response is not None:
             return None
 
         # Pre-Djehuty datasets may not have a Git UUID. We therefore
@@ -6800,7 +6915,7 @@ class ApiServer:
         storage_used      = self.db.account_storage_used (account_uuid)
         storage_available = account["quota"] - storage_used
         if storage_available < 1:
-            return self.error_413 (request, 0)
+            return self.error_413 (request)
 
         try:
             dataset   = self.__dataset_by_id_or_uri (dataset_id,
@@ -6809,9 +6924,10 @@ class ApiServer:
             if dataset is None:
                 return self.error_403 (request)
 
-            if not (not value_or (dataset, "is_shared_with_me", False) or
-                    value_or (dataset, "data_edit", False)):
-                return self.error_403 (request)
+            _, error_response = self.__needs_collaborative_permissions (
+                account_uuid, request, "dataset", dataset, "data_edit")
+            if error_response is not None:
+                return error_response
 
             content_type = value_or (request.headers, "Content-Type", "")
             if not content_type.startswith ("multipart/form-data"):
@@ -6840,7 +6956,7 @@ class ApiServer:
             # multipart headings (~220 bytes per chunk).
             if storage_available < bytes_to_read:
                 self.log.error ("File upload failed because user's quota limit: quota(%d), used(%d), available(%s), filesize(%d)", account["quota"], storage_used, storage_available, bytes_to_read)
-                return self.error_413 (request, storage_available, account["quota"], storage_used, bytes_to_read)
+                return self.error_413 (request)
 
             input_stream = request.stream
 
@@ -6955,12 +7071,18 @@ class ApiServer:
 
             computed_md5 = md5.hexdigest()
             download_url = f"{self.base_url}/file/{dataset_id}/{file_uuid}"
+
+            # Set an upper limit on thumbnailable images.
+            is_image = False
+            if file_size < 10000001:
+                is_image = self.__image_mimetype (output_filename) is not None
+
             self.db.update_file (account_uuid, file_uuid, dataset["uuid"],
                                  computed_md5  = computed_md5,
                                  download_url  = download_url,
                                  filesystem_location = output_filename,
                                  file_size     = file_size,
-                                 is_image      = self.__image_mimetype (output_filename) is not None,
+                                 is_image      = is_image,
                                  is_incomplete = is_incomplete)
 
             response_data = { "location": f"{self.base_url}/v3/file/{file_uuid}" }
@@ -7039,6 +7161,12 @@ class ApiServer:
         if metadata is None:
             return self.error_404 (request)
 
+        if value_or (metadata, "size", 0) >= 10000000:
+            self.log.error ("Tried to create a thumbnail for a large image.")
+            return self.error_400 (request,
+                message = "Cannot create thumbnails for images larger than 10MB.",
+                code = "ImageTooLarge")
+
         input_filename = self.__filesystem_location (metadata)
         if input_filename is None:
             return self.error_404 (request)
@@ -7065,9 +7193,10 @@ class ApiServer:
         if metadata is None:
             return self.error_404 (request)
 
-        if not (not value_or (metadata, "is_shared_with_me", False) or
-                value_or (metadata, "data_read", False)):
-            return self.error_403 (request)
+        _, error_response = self.__needs_collaborative_permissions (
+            account_uuid, request, "file", metadata, "data_read")
+        if error_response is not None:
+            return error_response
 
         try:
             metadata["base_url"] = self.base_url
@@ -7095,7 +7224,7 @@ class ApiServer:
 
             if request.method == 'DELETE':
                 url_encoded = validator.string_value (request.args, "url", 0, 1024, True)
-                url         = requests.utils.unquote(url_encoded)
+                url         = unquote(url_encoded)
                 references.remove (next (filter (lambda item: item == url, references)))
                 if not self.db.update_item_list (item["uuid"],
                                                  account_uuid,
@@ -7146,9 +7275,10 @@ class ApiServer:
                                                account_uuid=account_uuid,
                                                is_published=False)
 
-        if not (not value_or (dataset, "is_shared_with_me", False) or
-                value_or (dataset, "metadata_read", False)):
-            return self.error_403 (request)
+        _, error_response = self.__needs_collaborative_permissions (
+            account_uuid, request, "dataset", dataset, "metadata_read")
+        if error_response is not None:
+            return error_response
 
         return self.__api_v3_item_references (request, dataset)
 
@@ -7165,7 +7295,7 @@ class ApiServer:
 
         return self.__api_v3_item_references (request, collection)
 
-    def __api_v3_item_tags (self, request, item_id, item_by_id_procedure):
+    def __api_v3_item_tags (self, request, item_type, item_id, item_by_id_procedure):
         """Implements handling tags for both datasets and collections."""
 
         account_uuid = self.default_authenticated_error_handling (request,
@@ -7179,9 +7309,10 @@ class ApiServer:
                                           account_uuid=account_uuid,
                                           is_published=False)
 
-            if not (not value_or (item, "is_shared_with_me", False) or
-                    value_or (item, "metadata_read", False)):
-                return self.error_403 (request)
+            _, error_response = self.__needs_collaborative_permissions (
+                account_uuid, request, item_type, item, "metadata_read")
+            if error_response is not None:
+                return error_response
 
             tags = self.db.tags (
                 item_uri        = item["uri"],
@@ -7197,7 +7328,7 @@ class ApiServer:
 
             if request.method == 'DELETE':
                 tag_encoded = validator.string_value (request.args, "tag", 0, 1024, True)
-                tag         = requests.utils.unquote(tag_encoded)
+                tag         = unquote(tag_encoded)
                 tags.remove (next (filter (lambda item: item == tag, tags)))
                 if not self.db.update_item_list (item["uuid"],
                                                  account_uuid,
@@ -7247,11 +7378,11 @@ class ApiServer:
 
     def api_v3_collection_tags (self, request, collection_id):
         """Implements /v3/collections/<id>/tags."""
-        return self.__api_v3_item_tags (request, collection_id, self.__collection_by_id_or_uri)
+        return self.__api_v3_item_tags (request, "collection", collection_id, self.__collection_by_id_or_uri)
 
     def api_v3_dataset_tags (self, request, dataset_id):
         """Implements /v3/datasets/<id>/tags."""
-        return self.__api_v3_item_tags (request, dataset_id, self.__dataset_by_id_or_uri)
+        return self.__api_v3_item_tags (request, "dataset", dataset_id, self.__dataset_by_id_or_uri)
 
     def api_v3_groups (self, request):
         """Implements /v3/groups."""
@@ -7305,6 +7436,58 @@ class ApiServer:
 
         except validator.ValidationException as error:
             return self.error_400 (request, error.message, error.code)
+
+    def api_v3_admin_files_integrity_statistics (self, request):
+        """Implements /v3/admin/files-integrity-statistics."""
+
+        if not self.accepts_json (request):
+            return self.error_406 ("application/json")
+
+        token = self.token_from_cookie (request)
+        if not self.db.may_review_integrity (token):
+            return self.error_403 (request)
+
+        files = self.db.repository_file_statistics (extended_properties=True)
+        number_of_files = 0
+        number_of_inaccessible_files = 0
+        number_of_incomplete_metadata = 0
+        number_of_bytes = 0
+        number_of_links = 0
+        incomplete_metadata = []
+        missing_files = []
+
+        for entry in files:
+            if value_or (entry, "is_link_only", False):
+                number_of_links += 1
+                continue
+
+            number_of_files += 1
+            number_of_bytes += int(float(entry["bytes"]))
+
+            filesystem_location = self.__filesystem_location (entry)
+            if not filesystem_location:
+                number_of_incomplete_metadata += 1
+                incomplete_metadata.append (value_or (entry, "uuid", "unknown"))
+                continue
+
+            if not os.path.isfile (filesystem_location):
+                number_of_inaccessible_files += 1
+                missing_files.append (filesystem_location)
+
+        output = {
+            "number_of_links":              number_of_links,
+            "number_of_files":              number_of_files,
+            "number_of_bytes":              number_of_bytes,
+            "number_of_accessible_files":   number_of_files - number_of_inaccessible_files,
+            "number_of_inaccessible_files": number_of_inaccessible_files,
+            "number_of_incomplete_metadata": number_of_incomplete_metadata,
+            "percentage_accessible":        (1.0 - (number_of_inaccessible_files / number_of_files)) * 100,
+            "percentage_inaccessible":      number_of_inaccessible_files / number_of_files * 100,
+            "inaccessible_files":           missing_files,
+            "incomplete_metadata":          incomplete_metadata,
+        }
+
+        return self.response (json.dumps(output))
 
     def __git_create_repository (self, git_uuid):
         git_directory = f"{self.db.storage}/{git_uuid}.git"
@@ -7393,6 +7576,29 @@ class ApiServer:
             self.log.error ("The command was:\n---\n%s\n---", error.cmd)
             return self.error_500()
 
+    def api_v3_private_dataset_git_instructions (self, request, git_uuid):
+        """Implements an instruction page for /v3/datasets/<id>.git."""
+        handler = self.default_error_handling (request, "GET", "text/html")
+        if handler is not None:
+            return handler
+
+        if not validator.is_valid_uuid (git_uuid):
+            return self.error_404 (request)
+
+        try:
+            # Only consider published datasets to not reveal whether a UUID
+            # is reserved for a Git repository.
+            dataset = self.db.datasets (git_uuid     = git_uuid,
+                                        is_published = True,
+                                        is_latest    = None)[0]
+            git_repository_url = self.__git_repository_url_for_dataset (dataset)
+            return self.__render_template (request, "git_instructions.html",
+                                           git_repository_url = git_repository_url)
+        except IndexError:
+            pass
+
+        return self.error_404 (request)
+
     def api_v3_private_dataset_git_refs (self, request, git_uuid):
         """Implements /v3/datasets/<id>.git/<suffix>."""
 
@@ -7418,9 +7624,6 @@ class ApiServer:
                 dataset = self.db.datasets (git_uuid = git_uuid, is_published=False)[0]
 
             if dataset is not None:
-                if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "data_edit", False)):
-                    return self.error_403 (request)
                 return self.__git_passthrough (request)
         except IndexError:
             pass
@@ -7436,17 +7639,175 @@ class ApiServer:
                                             is_published = None,
                                             is_latest    = None)[0]
 
-            if dataset is not None:
-                if not (not value_or (dataset, "is_shared_with_me", False) or
-                        value_or (dataset, "data_read", False)):
-                    return self.error_403 (request)
-
                 self.__log_event (request, dataset["container_uuid"], "dataset", "gitDownload")
                 return self.__git_passthrough (request)
         except IndexError:
             pass
 
         return self.error_403 (request)
+
+    def __git_contributors (self, git_repository):
+        """Returns a list of contributors including their commit statistics."""
+        history = git_repository.walk (git_repository.head.target,
+                                       pygit2.enums.SortMode.REVERSE)
+        commits = list(history)
+        if not commits:
+            return None
+
+        # Accounting for the initial commit.
+        previous_commit = commits[0]
+        stats = self.__git_files_by_type (previous_commit.tree)
+        total_lines = 0
+        for extension in stats:
+            for entry in stats[extension]:
+                total_lines += value_or (entry, "lines", 0)
+
+        contributors = {
+            previous_commit.author.email: {
+                "name": previous_commit.author.name,
+                "email": previous_commit.author.email,
+                "commits": 1,
+                "additions": total_lines,
+                "deletions": 0
+            }
+        }
+
+        # Walk the repository's history.
+        for commit in commits[1:]:
+            stats = git_repository.diff(previous_commit, commit).stats
+            if commit.author.email in contributors:
+                record = contributors[commit.author.email]
+                record["commits"] += 1
+                record["additions"] += stats.insertions
+                record["deletions"] += stats.deletions
+            else:
+                contributors[commit.author.email] = {
+                    "name": commit.author.name,
+                    "email": commit.author.email,
+                    "commits": 1,
+                    "additions": stats.insertions,
+                    "deletions": stats.deletions
+                }
+            previous_commit = commit
+
+        return list(contributors.values())
+
+    def __git_files_by_type (self, tree, path="", output=None):
+        """
+        Returns a dictionary with the file extension as key and the list of
+        file statistics as value for the git repository TREE.
+        """
+        if output is None:
+            output = {}
+
+        for entry in tree:
+            # Walk the directory tree
+            if isinstance (entry, pygit2.Tree):  # pylint: disable=no-member
+                self.__git_files_by_type (list(entry), f"{path}{entry.name}/", output)
+                continue
+
+            record = { "filename": f"{path}{entry.name}", "size": entry.size }
+
+            # Skip over binary files and large files.
+            if entry.is_binary or entry.size > 5000000:
+                extension = "binary" if entry.is_binary else "large-text-file"
+                if extension in output:
+                    output[extension].append(record)
+                else:
+                    output[extension] = [record]
+                continue
+
+            # Add line-count information
+            record["lines"] = entry.data.count(b'\n')
+
+            # We count newlines, but that would miss out on the last
+            # line without a newline.
+            if entry.data != b'' and entry.data[-1:] != b'\n':
+                record["lines"] += 1
+
+            _, extension = os.path.splitext (entry.name)
+            extension = "no-extension" if extension == "" else extension.lstrip(".").lower()
+            language = value_or_none (filetypes_by_extension, extension)
+            if language is None:
+                language = "Other"
+            if language in output:
+                output[language].append(record)
+            else:
+                output[language] = [record]
+
+        return output
+
+    def __git_statistics_error_handling (self, request, git_uuid):
+
+        if not validator.is_valid_uuid (git_uuid):
+            return self.error_400 (request, "Invalid UUID.", "InvalidGitUUIError"), None
+
+        if not self.db.datasets (git_uuid=git_uuid, is_published=None, is_latest=None):
+            self.log.error ("No dataset associated with Git repository '%s'.", git_uuid)
+            return self.error_404 (request), None
+
+        git_directory = f"{self.db.storage}/{git_uuid}.git"
+        if not os.path.exists (git_directory):
+            self.log.error ("No Git repository at '%s'", git_directory)
+            return self.error_404 (request), None
+
+        git_repository = pygit2.Repository (git_directory)
+        if git_repository is None:
+            self.log.error ("Could not open Git repository for '%s'.", git_uuid)
+            return self.error_404 (request), None
+
+        default_branch = self.__git_repository_default_branch_guess (git_repository)
+        if not default_branch:
+            self.log.error ("Expected default branch to be set for '%s'.", git_uuid)
+            return self.error_404 (request), None
+
+        return git_repository, default_branch
+
+    def api_v3_dataset_git_languages (self, request, git_uuid):
+        """Implements /v3/datasets/<id>/languages."""
+
+        git_repository, branch = self.__git_statistics_error_handling (request, git_uuid)
+        if isinstance (git_repository, Response):
+            return git_repository
+
+        tree = git_repository.revparse_single(branch).tree # pylint: disable=no-member
+        statistics = self.__git_files_by_type (tree)
+
+        # Drop the binary count from the statistics, because we only
+        # generate a summary with line counts below.
+        statistics.pop("binary", None)
+
+        summary = {}
+        for _, extension in enumerate (statistics):
+            num_bytes_for_extension = 0
+            for entry in statistics[extension]:
+                num_lines = value_or (entry, "lines", 0)
+                num_bytes = value_or (entry, "size", 0)
+                # Remove minified sources by the heuristic that the average
+                # line length must be smaller than 300 bytes long.  This seems
+                # to come close to how Github reports the statistics.
+                if num_lines > 0 and num_bytes / num_lines < 300:
+                    num_bytes_for_extension += num_bytes
+
+            summary[extension] = num_bytes_for_extension
+
+        sorted_summary = dict(sorted(summary.items(),
+                                     key=lambda item: item[1],
+                                     reverse=True))
+        return self.response (json.dumps (sorted_summary))
+
+    def api_v3_dataset_git_contributors (self, request, git_uuid):
+        """Implements /v3/datasets/<id>/contributors."""
+
+        git_repository, _ = self.__git_statistics_error_handling (request, git_uuid)
+        if isinstance (git_repository, Response):
+            return git_repository
+
+        contributors = self.__git_contributors (git_repository)
+        if contributors is None:
+            return self.error_404 (request)
+
+        return self.response (json.dumps(contributors))
 
     def api_v3_profile (self, request):
         """Implements /v3/profile."""
@@ -7476,7 +7837,6 @@ class ApiServer:
                     biography             = validator.string_value  (record, "biography", 0, 32768),
                     institution_user_id   = validator.integer_value (record, "institution_user_id"),
                     institution_id        = validator.integer_value (record, "institution_id"),
-                    pending_quota_request = validator.integer_value (record, "pending_quota_request"),
                     maximum_file_size     = validator.integer_value (record, "maximum_file_size"),
                     modified_date         = validator.string_value  (record, "modified_date", 0, 32),
                     categories            = categories):
@@ -7508,14 +7868,25 @@ class ApiServer:
 
         try:
             parameters = request.get_json()
-            new_quota  = validator.integer_value (parameters, "new-quota", required=True)
+            quota_gb   = validator.integer_value (parameters, "new-quota", required=True)
             reason     = validator.string_value (parameters, "reason", 0, 10000, required=True)
+
+            if quota_gb < 1:
+                return self.error_400 (request,
+                    "Requested quota must be at least 1 gigabyte.",
+                    "QuotaRequestSizeTooSmall")
+
+            new_quota = quota_gb * 1000000000
+            quota_uuid = self.db.insert_quota_request (account_uuid, new_quota, reason)
+            if quota_uuid is None:
+                return self.error_500 ()
+
             account    = self.db.account_by_uuid (account_uuid)
             self.__send_email_to_quota_reviewers (
                 f"Quota request for {account_uuid}",
                 "quota_request",
                 email     = account['email'],
-                new_quota = new_quota,
+                new_quota = quota_gb,
                 reason    = reason)
 
             return self.respond_204 ()
@@ -7572,7 +7943,7 @@ class ApiServer:
             parameters = {}
             parameters["uri"] = self.get_parameter (request, "uri")
             uri        = validator.string_value (parameters, "uri", 0, 255)
-            uri        = requests.utils.unquote(uri)
+            uri        = unquote(uri)
             properties = self.db.properties_for_type (uri)
             properties = list(map (lambda item: item["predicate"], properties))
 
@@ -7598,9 +7969,9 @@ class ApiServer:
             parameters["property"] = self.get_parameter (request, "property")
 
             rdf_type     = validator.string_value (parameters, "type", 0, 255)
-            rdf_type     = requests.utils.unquote(rdf_type)
+            rdf_type     = unquote(rdf_type)
             rdf_property = validator.string_value (parameters, "property", 0, 255)
-            rdf_property = requests.utils.unquote(rdf_property)
+            rdf_property = unquote(rdf_property)
             types        = self.db.types_for_property (rdf_type, rdf_property)
             types        = list(map (lambda item: item["type"], types))
 
@@ -7624,6 +7995,22 @@ class ApiServer:
         self.db.cache.invalidate_by_prefix ("explorer_properties")
         self.db.cache.invalidate_by_prefix ("explorer_types")
         self.db.cache.invalidate_by_prefix ("explorer_property_types")
+
+        return self.respond_204 ()
+
+    def api_v3_admin_accounts_clear_cache (self, request):
+        """Implements /v3/admin/accounts/clear-cache."""
+
+        handler = self.default_error_handling (request, "GET", "application/json")
+        if handler is not None:
+            return handler
+
+        token = self.token_from_cookie (request)
+        if not self.db.may_administer (token):
+            return self.error_403 (request)
+
+        self.log.info ("Invalidating accounts caches.")
+        self.db.cache.invalidate_by_prefix ("accounts")
 
         return self.respond_204 ()
 
@@ -7999,8 +8386,87 @@ class ApiServer:
                 contributors.append(contr_dict)
         return contributors
 
+    def parse_search_terms (self, search_for):
+        """Procedure to parse search terms and operators in a string"""
+        if not isinstance(search_for, str):
+            return search_for
+
+        search_for = search_for.strip()
+        operators_mapping = {"(":"(", ")":")", "AND":"&&", "OR":"||"}
+        operators = operators_mapping.keys()
+
+        fields = ["title", "resource_title", "description",
+                  "format", "tag", "organizations"]
+        re_field = ":(" + "|".join(fields+["search_term"]) + "):"
+
+        search_tokens = re.findall(r'[^" ]+|"[^"]+"|\([^)]+\)', search_for)
+        search_tokens = [s.strip('"') for s in search_tokens]
+        has_operators = any((operator in search_for) for operator in operators)
+        has_fieldsearch = re.search(re_field, search_for) is not None
+
+        # Concatenate field name and its following token as one token.
+        for idx, token in enumerate(search_tokens):
+            if token is None:
+                continue
+            if re.search(re_field, token) is not None:
+                matched = re.split(':', token)[1::2][0]
+                if matched in fields:
+                    try:
+                        search_tokens[idx] = f"{token} {search_tokens[idx+1]}"
+                        search_tokens[idx+1] = None
+                    except IndexError:
+                        return search_for
+
+        search_tokens = [x for x in search_tokens if x is not None]
+
+        ## Unpacking this construction to replace AND and OR for &&
+        ## and || results in a query where && is stripped out.
+        if has_operators:
+            is_parenthesized = False
+            lparen_count = search_tokens.count("(")
+            rparen_count = search_tokens.count(")")
+            if lparen_count > 0 and lparen_count == rparen_count:
+                is_parenthesized = True
+            for idx, element in enumerate(search_tokens):
+                if element in operators:
+                    if element in ['(', ')'] and not is_parenthesized:
+                        continue
+                    search_tokens[idx] = {"operator": operators_mapping[element]}
+        else:
+            # No operators found in the search query. Adding OR operators.
+            index = -1
+            while len(search_tokens) + index > 0:
+                search_tokens.insert(index, {"operator": "||"})
+                index = index - 2
+
+        for idx, search_term in enumerate(search_tokens):
+            if isinstance(search_term, dict):
+                continue
+
+            if re.search(re_field, search_term) is not None:
+                field_name = re.split(':', search_term)[1::2][0]
+                value = list(filter(None, [s.strip() for s in re.split(':', search_term)[0::2]]))[0]
+
+                if field_name in fields:
+                    search_tokens[idx] = {field_name: value}
+                elif field_name == "search_term":
+                    search_dict = {}
+                    for field_name in fields:
+                        search_dict[field_name] = value
+                    search_tokens[idx] = search_dict
+
+                field_name = None
+
+            elif has_fieldsearch is False:
+                search_dict = {}
+                for field in fields:
+                    search_dict[field] = search_term
+                search_tokens[idx] = search_dict
+
+        return search_tokens
+
     def add_names_to_authors (self, authors):
-        """ Procedure to add missing first_name and last_name to author dict """
+        """Procedure to add missing first_name and last_name to author dict"""
         for author in authors:
             if 'full_name' not in author:
                 author['full_name'] = ''

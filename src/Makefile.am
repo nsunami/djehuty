@@ -35,6 +35,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/html_templates/activate_2fa_session.html            \
     djehuty/web/resources/html_templates/admin/dashboard.html                 \
     djehuty/web/resources/html_templates/admin/exploratory.html               \
+    djehuty/web/resources/html_templates/admin/quota_requests.html            \
     djehuty/web/resources/html_templates/admin/reports/dashboard.html         \
     djehuty/web/resources/html_templates/admin/reports/embargoed_datasets.html \
     djehuty/web/resources/html_templates/admin/reports/restricted_datasets.html \
@@ -46,6 +47,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/html_templates/categories.html                      \
     djehuty/web/resources/html_templates/category.html                        \
     djehuty/web/resources/html_templates/collection.html                      \
+    djehuty/web/resources/html_templates/colors.css                           \
     djehuty/web/resources/html_templates/dataset_access_request.html          \
     djehuty/web/resources/html_templates/dataset.html                         \
     djehuty/web/resources/html_templates/depositor/collection-private-links.html \
@@ -74,13 +76,17 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/html_templates/email/layout.html                    \
     djehuty/web/resources/html_templates/email/published_dataset_notification.html \
     djehuty/web/resources/html_templates/email/published_dataset_notification.txt \
+    djehuty/web/resources/html_templates/email/quota_approved.html            \
+    djehuty/web/resources/html_templates/email/quota_approved.txt             \
     djehuty/web/resources/html_templates/email/quota_request.html             \
     djehuty/web/resources/html_templates/email/quota_request.txt              \
     djehuty/web/resources/html_templates/email/submitted_for_review_notification.html \
     djehuty/web/resources/html_templates/email/submitted_for_review_notification.txt \
     djehuty/web/resources/html_templates/feedback.html                        \
+    djehuty/web/resources/html_templates/git_instructions.html                \
     djehuty/web/resources/html_templates/institutions.html                    \
     djehuty/web/resources/html_templates/layout.html                          \
+    djehuty/web/resources/html_templates/loader.svg                           \
     djehuty/web/resources/html_templates/maintenance.html                     \
     djehuty/web/resources/html_templates/opendap_to_doi.html                  \
     djehuty/web/resources/html_templates/portal.html                          \
@@ -116,6 +122,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/sparql_templates/collections.sparql                 \
     djehuty/web/resources/sparql_templates/collections_by_account.sparql      \
     djehuty/web/resources/sparql_templates/collections_from_dataset.sparql    \
+    djehuty/web/resources/sparql_templates/contact_info_from_container.sparql \
     djehuty/web/resources/sparql_templates/container.sparql                   \
     djehuty/web/resources/sparql_templates/container_items.sparql             \
     djehuty/web/resources/sparql_templates/container_uuid_by_id.sparql        \
@@ -127,6 +134,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/sparql_templates/dataset_storage_used.sparql        \
     djehuty/web/resources/sparql_templates/dataset_versions.sparql            \
     djehuty/web/resources/sparql_templates/datasets.sparql                    \
+    djehuty/web/resources/sparql_templates/datasets_missing_dois.sparql       \
     djehuty/web/resources/sparql_templates/decline_draft_dataset.sparql       \
     djehuty/web/resources/sparql_templates/delete_account_property.sparql     \
     djehuty/web/resources/sparql_templates/delete_associations.sparql         \
@@ -148,7 +156,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/sparql_templates/funding.sparql                     \
     djehuty/web/resources/sparql_templates/group.sparql                       \
     djehuty/web/resources/sparql_templates/group_by_name.sparql               \
-    djehuty/web/resources/sparql_templates/contact_info_from_container.sparql \
+    djehuty/web/resources/sparql_templates/item_collaborative_permissions.sparql \
     djehuty/web/resources/sparql_templates/latest_datasets_portal.sparql      \
     djehuty/web/resources/sparql_templates/licenses.sparql                    \
     djehuty/web/resources/sparql_templates/missing_checksummed_files_for_container.sparql \
@@ -157,6 +165,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/sparql_templates/private_links.sparql               \
     djehuty/web/resources/sparql_templates/publish_draft_collection.sparql    \
     djehuty/web/resources/sparql_templates/publish_draft_dataset.sparql       \
+    djehuty/web/resources/sparql_templates/quota_requests.sparql              \
     djehuty/web/resources/sparql_templates/record_uri.sparql                  \
     djehuty/web/resources/sparql_templates/references.sparql                  \
     djehuty/web/resources/sparql_templates/reviews.sparql                     \
@@ -173,10 +182,12 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/sparql_templates/update_collection.sparql           \
     djehuty/web/resources/sparql_templates/update_dataset.sparql              \
     djehuty/web/resources/sparql_templates/update_dataset_thumb.sparql        \
+    djehuty/web/resources/sparql_templates/update_doi_after_publishing.sparql \
     djehuty/web/resources/sparql_templates/update_file.sparql                 \
     djehuty/web/resources/sparql_templates/update_git_uuid.sparql             \
     djehuty/web/resources/sparql_templates/update_orcid_for_account.sparql    \
     djehuty/web/resources/sparql_templates/update_private_link.sparql         \
+    djehuty/web/resources/sparql_templates/update_quota_request.sparql        \
     djehuty/web/resources/sparql_templates/update_review.sparql               \
     djehuty/web/resources/sparql_templates/update_session.sparql              \
     djehuty/web/resources/sparql_templates/update_view_and_download_counts.sparql \
@@ -218,7 +229,6 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/static/images/licenses/cc-by-nd.png                 \
     djehuty/web/resources/static/images/licenses/cc-by-sa.png                 \
     djehuty/web/resources/static/images/licenses/gnu-gpl-v3.png               \
-    djehuty/web/resources/static/images/loader.svg                            \
     djehuty/web/resources/static/images/logo.png                              \
     djehuty/web/resources/static/images/logo-delft.png                        \
     djehuty/web/resources/static/images/logo-eindhoven.png                    \

@@ -29,13 +29,7 @@ jQuery(document).ready(function (){
     });
 {%- endfor %}
 {%- if article.is_shared_with_me %}
-    let permissions = {
-        "metadata_read": {{article.metadata_read|tojson}},
-        "metadata_edit": {{article.metadata_edit|tojson}},
-        "data_read": {{article.data_read|tojson}},
-        "data_edit": {{article.data_edit|tojson}},
-        "data_remove": {{article.data_remove|tojson}}
-    };
+    let permissions = {{permissions|tojson}};
 {%- else %}
     let permissions = {
         "metadata_read": true, "metadata_edit": true,
@@ -43,10 +37,14 @@ jQuery(document).ready(function (){
     }
 {%- endif %}
     activate ("{{container_uuid}}", permissions, function() {
-{%- if article.is_shared_with_me and not article.metadata_edit %}
+{%- if article.is_shared_with_me and not permissions.metadata_edit %}
     jQuery("#content-wrapper :input").prop("disabled", "disabled").css("background", "#EEE");
     jQuery(".ql-editor").prop("contenteditable", false).css("background", "#EEE");
     jQuery(".upload-container").css("background", "#EEE");
+{%- endif %}
+{%- if article.is_shared_with_me and not permissions.data_edit %}
+    jQuery(".upload-container").after('<div style="padding: .5em; margin-bottom: 1em; text-align: left" class="notice-box">You do not have permission to upload files.</div>');
+    jQuery(".upload-container").hide();
 {%- endif %}
     });
 });
@@ -190,12 +188,12 @@ jQuery(document).ready(function (){
   {%- else %}
   <li><a href="/my/datasets">&#8592; Go back</a>
   {%- endif %}
-  {%- if article.is_shared_with_me and not article.metadata_edit %}
+  {%- if article.is_shared_with_me and not permissions.metadata_edit %}
   <li class="active corporate-identity-submenu-active">Read-only dataset
   {%- else %}
   <li class="active corporate-identity-submenu-active">Edit dataset
   {%- endif %}
-  {%- if not article.is_shared_with_me or article.metadata_edit %}
+  {%- if not article.is_shared_with_me or permissions.metadata_edit %}
   <li class="hide-for-javascript save-button"><a id="save" href="#">Save draft</a>
   {%- endif %}
   {%- if not article.is_under_review and not article.is_shared_with_me %}
@@ -217,7 +215,7 @@ jQuery(document).ready(function (){
 <div class="article-content">
 {%- if article.title == "Untitled item" %}
 <h1>Add new dataset</h1>
-{%- elif article.is_shared_with_me and not article.metadata_edit %}
+{%- elif article.is_shared_with_me and not permissions.metadata_edit %}
 <h1>Read-only dataset</h1>
 {%- else %}
 <h1>Edit dataset</h1>
@@ -251,7 +249,7 @@ jQuery(document).ready(function (){
       <tr>
         <th colspan="1" scope="colgroup">Collaborator</th>
         <th colspan="2" scope="colgroup">Metadata</th>
-        <th colspan="3" scope="colgroup">Dataset</th>
+        <th colspan="3" scope="colgroup">Files</th>
         <th colspan="1" scope="colgroup"></th>
       </tr>
       <tr>
@@ -287,7 +285,7 @@ jQuery(document).ready(function (){
   </div>
   <div class="access_level" id="open_access_form">
     <p>
-      Open access is the default setting in 4TU.ResearchData by which your dataset will be directly accessible to others.
+      Open access is the default setting in {{site_name}} by which your dataset will be directly accessible to others.
     </p>
     <label for="license_open" class="inner-head">Licence</label><div class="fas fa-question-circle help-icon"><span class="help-text">Select the appropriate licence from the list. Need to know more? Read our <a target="_blank" rel="noopener noreferrer" href="https://data.4tu.nl/info/en/use/publish-cite/upload-your-data-in-our-data-repository/licencing">guidance</a> for more information on the licence types we offer.</span></div><span class="required-field"> &#8727;</span>
     <select id="license_open" class="license-selector" name="license">
@@ -370,7 +368,7 @@ jQuery(document).ready(function (){
 {%- endfor %}
 </div>
 <label for="publisher">Publisher</label>
-<input type="text" id="publisher" name="publisher" value="{{article["publisher"] | default("4TU.ResearchData", True)}}">
+<input type="text" id="publisher" name="publisher" value="{% if article["publisher"] %}{{article["publisher"]}}{% else %}{{site_name}}{% endif %}">
 <label for="funding">Funding</label><div class="fas fa-question-circle help-icon"><span class="help-text">Select from the list by searching for funder name, grant number or grant name or manually add them by creating a new funding record.</span></div>
 <input type="text" id="funding" name="funding" />
 <table class="inside-form-table multi-list" id="funding-list">
@@ -397,7 +395,7 @@ jQuery(document).ready(function (){
   </thead>
   <tbody></tbody>
 </table>
-<label>DOI reservation</label><div class="fas fa-question-circle help-icon"><span class="help-text">Upon publication, a DOI will be assigned to your dataset. If you need to have the DOI before publication, reserve it here.</span></div>
+<label>DOI reservation</label><div class="fas fa-question-circle help-icon"><span class="help-text">Upon publication, a DOI will be assigned to your dataset. If you need to have the DOI before publication, you can use this value.</span></div>
 <div id="doi-wrapper" class="options-wrapper">
   <p><a href="#" onclick="javascript:reserve_doi('{{article["container_uuid"]}}'); return false;">Reserve DOI</a>.</p>
 </div>
@@ -452,7 +450,7 @@ jQuery(document).ready(function (){
 </div>
 <div id="external_link_field" class="record-type-field">
   <p>Only use when no files can be attached. Add the URL where your files can
-    be found. Note that 4TU.ResearchData is not responsible for maintaining the
+    be found. Note that {{site_name}} is not responsible for maintaining the
     link or for its validity.</p>
   <label for="external_link">External URL</label>
   <input type="text" name="external_url" id="external_url" value="{{article["url"]}}" />
@@ -462,13 +460,13 @@ jQuery(document).ready(function (){
 </div>
 <div id="software_upload_field" class="record-type-field">
   <h4 class="corporate-identity-h4">Publish source code through Git</h4>
-  <p>To publish from a Git repository, push a branch to the <code>4tu</code> remote.</p>
-  <p>First, add the <code>4tu</code> remote:</p>
-  <pre>git remote add 4tu {{base_url}}/v3/datasets/{{article.git_uuid}}.git</pre>
+  <p>To publish from a Git repository, push a branch to the <code>{{site_shorttag}}</code> remote.</p>
+  <p>First, add the <code>{{site_shorttag}}</code> remote:</p>
+  <pre>git remote add {{site_shorttag}} {{base_url}}/v3/datasets/{{article.git_uuid}}.git</pre>
   <p>Then, push the repository to it:</p>
   <pre>
-git push 4tu --all
-git push 4tu --tags</pre>
+git push {{site_shorttag}} --all
+git push {{site_shorttag}} --tags</pre>
   <h4 class="corporate-identity-h4">Git repository files and branches <span class="no-select"> &nbsp;<a id="refresh-git-files" href="#" class="fas fa-sync"></a></span></h4>
   <label>Git default branch</label><div class="fas fa-question-circle help-icon"><span class="help-text">The selected branch will be the branch a user is in after pulling the Git repository.</span></div>
   <select id="git-branches">

@@ -45,35 +45,6 @@
        url("/static/fonts/fa-brands-400.ttf") format("truetype");
 }
 
-.corporate-identity { color: #f49120; }
-.corporate-identity:hover { color: #d26000; }
-
-.corporate-identity-h1 { border-bottom: 4px dotted #f49120;}
-.corporate-identity-h3 { border-bottom: 4px dotted #f49120; }
-.corporate-identity-h4 { border-bottom: 2px dotted #f49120; }
-
-.corporate-identity li.active { background: #f49120; }
-.corporate-identity li.active a { color: #ffffff; text-decoration: none; }
-.corporate-identity-submenu-active { border-bottom: solid .25em #f49120; }
-
-.corporate-identity-background { background: #f49120; }
-
-.corporate-identity-border { border: solid 2pt #f49120; }
-.corporate-identity-header { border-top: 4px solid #f49120; }
-.corporate-identity-footer { color: #ffffff; background: #707070; border-bottom: 3px solid #f49120; }
-
-.corporate-identity-privilege-button { background: #fce3bf; }
-.corporate-identity-standard-button { background: #f49120; color: #fff; font-weight: bold; text-decoration: none; }
-.corporate-identity-standard-button:hover { background: #d26000; cursor: pointer; color: #fff; text-decoration: none; }
-.corporate-identity-standard-button:active { background: #9d4800; cursor: pointer; color: #fff; text-decoration: none; }
-
-.corporate-identity-table {
-    width: 100%;
-    max-width: 880pt;
-    border: solid 2pt #f49120;
-    border-radius: .5em;
-}
-.corporate-identity-table thead tr { background: #f49120; border-radius: .5em .5em 0em 0em; }
 .corporate-identity-table thead tr th {
     color: #000;
     text-align: left;
@@ -172,9 +143,6 @@ body,html {
     font-weight: bold;
     text-decoration: none;
 }
-#login-button { margin-right: 25px; background: #f39000; color: #ffffff; }
-#login-button:hover { background: #d26000; cursor: pointer; }
-#login-button:active { background: #9d4800; cursor: pointer; }
 #login-button a { color: #ffffff; text-decoration: none; }
 #dashboard-button { margin-left: .5em; background: #505050; color: #ffffff; }
 #dashboard-button:hover { background: #303030; cursor: pointer; }
@@ -215,14 +183,12 @@ body,html {
     text-transform: uppercase;
 }
 #site-navigation ul:first-child { margin-left: 5mm; }
-#primary-menu .menu-item-has-children:hover { color: #f39000; }
 #primary-menu .menu-item-has-children:hover > ul {
     background: #ffffff;
     display: block;
     min-width: 120pt;
 }
 #primary-menu li a { text-decoration: none; }
-#primary-menu li a:hover { color: #f39000; }
 .submenu {
     position: absolute;
     display: none;
@@ -449,6 +415,9 @@ a.far, a.fab, a.fas { text-decoration: none; }
 .fa-tile::before { content: "\f84c"; }
 .fa-list::before { content: "\f03a"; }
 .fa-orcid::before { content: "\f8d2"; }
+.fa-thumbs-up::before { content: "\f164"; }
+.fa-thumbs-down::before { content: "\f165"; }
+.fa-comments-dots::before { content: "\f4ad"; }
 .fa-empty::before {}
 
 ul.latest-datasets { list-style: square; margin-left: 0pt; padding-left: 1em; font-size: 13pt; }
@@ -524,7 +493,7 @@ img { user-select: none; }
     width: auto;
     min-height: 100px;
     background-color: rgba(255, 255, 255, 0.5);
-    background-image: url('/static/images/loader.svg');
+    background-image: url('/theme/loader.svg');
     background-position: center;
     background-repeat: no-repeat;
     z-index: 100;
@@ -534,7 +503,7 @@ img { user-select: none; }
     width: auto;
     min-height: 100px;
     background-color: rgba(255, 255, 255, 0.5);
-    background-image: url('/static/images/loader.svg');
+    background-image: url('/theme/loader.svg');
     background-position: top;
     background-repeat: no-repeat;
     z-index: 100;
@@ -543,8 +512,10 @@ img { user-select: none; }
 .hide-for-javascript { display: none !important; }
 #message { display: none; color: #ffffff; border-radius: .5em; padding: 0em; margin: 0em;  }
 #message p { padding: 1em; }
+#message a { color: #fff; }
 .success { background: #009900; padding: 0em; margin: 0em; }
 .failure { background: #990000; padding: 0em; margin: 0em; }
+.transparent { background: none; padding: 0em; margin: 0em; user-select: none; }
 .hidden { font-size: 0; user-select: none; }
 .center { text-align: center; }
 .no-select { user-select: none; }

@@ -1,0 +1,9 @@
+Quota request approved
+======================
+
+Dear {{first_name}},
+Your quota request of {{requested_size}} gigabytes has been approved and made to available to you.
+
+This is an automated message. For further questions, either use the feedback form [1] or e-mail us at {{support_email}}.
+
+[1] {{base_url}}/feedback

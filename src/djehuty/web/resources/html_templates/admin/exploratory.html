@@ -2,6 +2,7 @@
 {% block headers %}
   <script src="/static/js/jquery-3.6.0.min.js"></script>
   <script src="/static/js/d3.v7.min.js"></script>
+  <script src="/static/js/utils.js"></script>
   <script src="/static/js/exploratory.js"></script>
   <style>
 #data-model-explorer {
@@ -52,6 +53,7 @@
   <li class="active corporate-identity-submenu-active">Exploratory
   <li><a href="/admin/reports">Reports</a>
   {% if may_query %}<li><a href="/admin/sparql">Query</a>{% endif %}
+  {% if may_review_quotas %}<li><a href="/admin/quota-requests">Quota requests</a>{% endif %}
 </ul>
 {% endblock %}
 {% block body %}

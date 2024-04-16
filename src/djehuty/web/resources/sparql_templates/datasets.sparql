@@ -6,7 +6,7 @@ SELECT (COUNT(DISTINCT ?dataset) AS ?datasets)
 # The wrapping in STR() is added because Virtuoso outputs one row for
 # non-typed and one row for a typed literal.
 SELECT DISTINCT ?account_uuid ?citation ?confidential_reason ?container_uuid
-                ?created_date ?custom_fields_id ?defined_type ?defined_type_name
+                ?created_date ?defined_type ?defined_type_name
                 ?description ?doi ?embargo_until_date ?is_public
                 ?embargo_reason ?embargo_title ?embargo_type ?figshare_url
                 ?funding ?group_id ?has_linked_file ?dataset_id ?eula
@@ -25,8 +25,7 @@ SELECT DISTINCT ?account_uuid ?citation ?confidential_reason ?container_uuid
                 ?is_under_review (?review AS ?review_uri) ?review_submit_date
                 ?totals_created_at ?total_downloads ?total_views ?total_shares
                 ?total_cites ?git_uuid ?agreed_to_deposit_agreement ?agreed_to_publish
-                ?private_link_is_expired ?is_shared_with_me ?metadata_read ?metadata_edit
-                ?data_read ?data_edit ?data_remove
+                ?private_link_is_expired ?is_shared_with_me ?anonymize
 {%endif%}
 WHERE {
   GRAPH <{{state_graph}}> {
@@ -46,6 +45,7 @@ WHERE {
     {%- if private_link_id_string is not none %}
     ?dataset            djht:private_links/rdf:rest*/rdf:first ?private_link .
     ?private_link       djht:id                   ?private_link_id_string .
+    OPTIONAL { ?private_link djht:anonymize       ?anonymize . }
     {%- endif %}
 
     OPTIONAL {
@@ -90,15 +90,14 @@ WHERE {
       ?dataset          djht:license               ?license_url .
       ?license_url      rdf:type                   djht:License .
       ?license_url      djht:id                    ?license_id .
-      ?license_url      djht:spdx                  ?license_spdx .
       ?license_url      djht:name                  ?license_name .
+      OPTIONAL { ?license_url djht:spdx            ?license_spdx . }
     }
 
     OPTIONAL { ?dataset djht:git_uuid              ?git_uuid . }
     OPTIONAL { ?dataset djht:citation              ?citation . }
     OPTIONAL { ?dataset djht:confidential_reason   ?confidential_reason . }
     OPTIONAL { ?dataset djht:created_date          ?created_date . }
-    OPTIONAL { ?dataset djht:custom_fields_id      ?custom_fields_id . }
     OPTIONAL { ?dataset djht:defined_type          ?defined_type . }
     OPTIONAL { ?dataset djht:defined_type_name     ?defined_type_name . }
     OPTIONAL { ?dataset djht:description           ?description . }
@@ -149,17 +148,14 @@ WHERE {
     OPTIONAL { ?dataset djht:agreed_to_deposit_agreement ?agreed_to_deposit_agreement . }
     OPTIONAL { ?dataset djht:agreed_to_publish     ?agreed_to_publish . }
 
-    {
-      ?container_uri      djht:account              ?account .
-    } UNION {
-      ?dataset            djht:collaborators/rdf:rest*/rdf:first ?collaborator .
-      ?collaborator       djht:account ?account .
-      ?collaborator       djht:metadata_read  ?metadata_read .
-      ?collaborator       djht:metadata_edit ?metadata_edit .
-      ?collaborator       djht:data_read  ?data_read .
-      ?collaborator       djht:data_edit ?data_edit .
-      ?collaborator       djht:data_remove ?data_remove .
+    ?container_uri      djht:account              ?account .
+    {%- if not disable_collaboration %}
+    OPTIONAL {
+      ?collaborator       rdf:type            djht:Collaborator .
+      ?collaborator       djht:item           ?dataset .
+      ?collaborator       djht:account        ?collaborator_account .
     }
+    {%- endif %}
 
     OPTIONAL { ?dataset djht:is_under_review       ?is_under_review_tmp . }
     BIND(COALESCE(?is_under_review_tmp, "false"^^xsd:boolean) AS ?is_under_review)
@@ -182,7 +178,7 @@ WHERE {
     {%- else %}
     BIND("false"^^xsd:boolean AS ?private_link_is_expired)
     {%- endif %}
-    BIND(xsd:boolean(BOUND(?collaborator)) AS ?is_shared_with_me)
+    BIND(xsd:boolean(?collaborator_account = <account:{{account_uuid}}>) AS ?is_shared_with_me)
   }
 {%- if is_under_review is not none: %}
 {%- if is_under_review: %}
@@ -195,7 +191,12 @@ FILTER (?is_under_review = "false"^^xsd:boolean)
 FILTER (?collection = <{{collection_uri}}>)
 {%- endif %}
 {%- if account_uuid is not none: %}
+  {%- if disable_collaboration %}
 FILTER (?account = <account:{{account_uuid}}>)
+  {%- else %}
+FILTER (?account = <account:{{account_uuid}}> ||
+        ?collaborator_account = <account:{{account_uuid}}>)
+  {%- endif %}
 {%- endif %}
 {% if filters is not none %}{{ filters | safe }}{% endif %}
 }
