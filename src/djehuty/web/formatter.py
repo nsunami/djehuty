@@ -5,6 +5,20 @@ djehuty.database to be backward-compatible with Figshare.
 
 from djehuty.utils import convenience as conv
 
+def format_collaborator_record (record):
+    """Record formatter for collaborators"""
+    return {
+        "uuid":           conv.value_or_none(record, "uuid"),
+        "first_name":     conv.value_or_none (record, "first_name"),
+        "last_name":      conv.value_or_none(record, "last_name"),
+        "email":          conv.value_or_none(record, "email"),
+        "metadata_read":  conv.value_or_none (record, "metadata_read"),
+        "metadata_edit":  conv.value_or_none(record, "metadata_edit"),
+        "data_read":      conv.value_or_none(record, "data_read"),
+        "data_edit":      conv.value_or_none(record, "data_edit"),
+        "data_remove":    conv.value_or_none(record, "data_remove")
+    }
+
 def format_account_record (record):
     """Record formatter for accounts."""
     return {
@@ -12,6 +26,22 @@ def format_account_record (record):
         "uuid":           conv.value_or_none(record, "uuid"),
         "first_name":     conv.value_or_none(record, "first_name"),
         "last_name":      conv.value_or_none(record, "last_name"),
+        "full_name":      conv.value_or_none(record, "full_name"),
+        "is_active":      bool(conv.value_or_none(record, "active")),
+        "is_public":      bool(conv.value_or_none(record, "public")),
+        "job_title":      conv.value_or_none(record, "job_title"),
+        "orcid_id":       conv.value_or (record, "orcid_id", ""),
+    }
+
+def format_account_details_record (record):
+    """Record formatter for accounts."""
+    return {
+        "id":             conv.value_or_none(record, "account_id"),
+        "uuid":           conv.value_or_none(record, "uuid"),
+        "first_name":     conv.value_or_none(record, "first_name"),
+        "last_name":      conv.value_or_none(record, "last_name"),
+        "full_name":      conv.value_or_none(record, "full_name"),
+        "email":          conv.value_or_none(record, "email"),
         "is_active":      bool(conv.value_or_none(record, "active")),
         "is_public":      bool(conv.value_or_none(record, "public")),
         "job_title":      conv.value_or_none(record, "job_title"),
@@ -62,6 +92,47 @@ def dataset_urls (record):
         "url_public_api":   conv.value_or_none(record, "url_public_api"),
         "url_private_html": conv.value_or_none(record, "url_private_html"),
         "url_public_html":  conv.value_or_none(record, "url_public_html")
+    }
+
+def format_codemeta_author_record (record):
+    """Record formatter for an author as used in CodeMeta."""
+    author = {
+        "@type": "Person",
+        "givenName": conv.value_or_none (record, "first_name"),
+        "familyName": conv.value_or_none (record, "last_name"),
+        "email": conv.value_or_none (record, "email"),
+    }
+
+    orcid = conv.value_or_none (record, "orcid_id")
+    if orcid is not None:
+        author["@id"] = f"https://orcid.org/{orcid}"
+
+    return author
+
+def format_codemeta_record (record, git_url, tags, authors):
+    """Record formatter for the CodeMeta format."""
+
+    if bool(conv.value_or (record, "is_embargoed", False)):
+        return {
+            "@context": "https://doi.org/10.5063/schema/codemeta-2.0",
+            "@type": "SoftwareSourceCode",
+            "dateCreated": conv.value_or_none(record, "created_date"),
+            "datePublished": conv.value_or_none(record, "published_date"),
+            "embargoDate": conv.value_or_none(record, "embargo_until_date")
+        }
+
+    return {
+        "@context": "https://doi.org/10.5063/schema/codemeta-2.0",
+        "@type": "SoftwareSourceCode",
+        "license": conv.value_or_none (record, "license_spdx"),
+        "codeRepository": git_url,
+        "dateCreated": conv.value_or_none(record, "created_date"),
+        "datePublished": conv.value_or_none(record, "published_date"),
+        "dateModified": conv.value_or_none(record, "modified_date"),
+        "identifier": conv.value_or_none(record, "doi"),
+        "description": conv.value_or_none(record, "description"),
+        "keywords": list (map (format_tag_record, tags)),
+        "author": list (map (format_codemeta_author_record, authors))
     }
 
 def format_dataset_record (record):

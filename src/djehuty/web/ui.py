@@ -555,6 +555,11 @@ def read_configuration_file (server, config_file, address, port, state_graph,
         server.allow_crawlers = read_boolean_value (xml_root, "allow-crawlers",
                                                     server.allow_crawlers, logger)
 
+        ssi_psk = config_value (xml_root, "ssi-psk")
+        if ssi_psk is not None:
+            ssi_psk = ssi_psk.replace(" ", "").replace("\n", "").replace("\r", "").replace("\t", "")
+            server.ssi_psk = ssi_psk
+
         enable_query_audit_log = xml_root.find ("enable-query-audit-log")
         if enable_query_audit_log is not None:
             config["transactions_directory"] = enable_query_audit_log.attrib.get("transactions-directory")
@@ -626,6 +631,10 @@ def read_configuration_file (server, config_file, address, port, state_graph,
         use_x_forwarded_for = bool(int(config_value (xml_root, "use-x-forwarded-for", None, 0)))
         if use_x_forwarded_for:
             server.log_access = server.log_access_using_x_forwarded_for
+
+        server.disable_collaboration = read_boolean_value (xml_root, "disable-collaboration",
+                                                           server.disable_collaboration,
+                                                           logger)
 
         sandbox_message, sandbox_message_attributes = read_raw_xml (xml_root, "sandbox-message")
         if sandbox_message:

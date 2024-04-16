@@ -372,7 +372,7 @@ class SparqlInterface:
                   resource_doi=None, return_count=False, search_for=None, search_format=False,
                   version=None, is_published=True, is_under_review=None, git_uuid=None,
                   private_link_id_string=None, use_cache=True, is_restricted=None,
-                  is_embargoed=None):
+                  is_embargoed=None, is_software=None):
         """Procedure to retrieve version(s) of datasets."""
 
         filters  = rdf.sparql_filter ("container_uri",  rdf.uuid_to_uri (container_uuid, "container"), is_uri=True)
@@ -391,6 +391,12 @@ class SparqlInterface:
         filters += rdf.sparql_in_filter ("group_id",    groups)
         filters += rdf.sparql_in_filter ("dataset_id", exclude_ids, negate=True)
         filters += self.__search_query_to_sparql_filters (search_for, search_format)
+
+        if is_software is not None:
+            if is_software:
+                filters += rdf.sparql_filter ("defined_type_name", "software", escape=True)
+            else:
+                filters += rdf.sparql_filter ("defined_type_name", "dataset", escape=True)
 
         if categories is not None:
             filters += f"FILTER ((?category_id IN ({','.join(map(str, categories))})) || "
@@ -1400,7 +1406,7 @@ class SparqlInterface:
         return None
 
     def insert_account (self, email=None, first_name=None, last_name=None,
-                        full_name=None, location=None, biography=None):
+                        common_name=None, location=None, biography=None):
         """Procedure to create an account."""
 
         graph       = Graph()
@@ -1415,7 +1421,7 @@ class SparqlInterface:
         rdf.add (graph, account_uri, rdf.DJHT["active"],     1)
         rdf.add (graph, account_uri, rdf.DJHT["first_name"], first_name, XSD.string)
         rdf.add (graph, account_uri, rdf.DJHT["last_name"],  last_name,  XSD.string)
-        rdf.add (graph, account_uri, rdf.DJHT["full_name"],  full_name,  XSD.string)
+        rdf.add (graph, account_uri, rdf.DJHT["full_name"],  common_name, XSD.string)
         rdf.add (graph, account_uri, rdf.DJHT["email"],      email,      XSD.string)
         rdf.add (graph, account_uri, rdf.DJHT["domain"],     domain,     XSD.string)
         rdf.add (graph, account_uri, rdf.DJHT["location"],   location,   XSD.string)
@@ -1655,7 +1661,7 @@ class SparqlInterface:
 
         graph       = Graph()
         entry_uri   = rdf.unique_node ("log-entry")
-        type_suffix = f"LogEntry{event_type.capitalize()}"
+        type_suffix = f"LogEntry{event_type[0].upper()}{event_type[1:]}"
         item_uri    = rdf.uuid_to_uri (item_uuid, "container")
 
         graph.add ((entry_uri, RDF.type, rdf.DJHT["LogEntry"]))
@@ -1667,6 +1673,68 @@ class SparqlInterface:
             return True
 
         return False
+
+    def collaborators (self, dataset_uuid, account_uuid=None):
+        "Get list of collaborators of a dataset"
+        query = self.__query_from_template("collaborators", {
+            "dataset_uuid": dataset_uuid,
+            "account_uuid": account_uuid,
+        })
+
+        return self.__run_query(query)
+
+    def insert_collaborator (self, dataset_uuid, collaborator_uuid,
+                             account_uuid, metadata_read, metadata_edit,
+                             data_read, data_edit, data_remove):
+        """Procedure to add a collaborator to the state graph."""
+
+        graph = Graph()
+        collaborator_uri = rdf.unique_node("collaborator")
+
+        graph.add ((collaborator_uri, RDF.type,      rdf.DJHT["Collaborator"]))
+        rdf.add (graph, collaborator_uri, rdf.DJHT["metadata_read"], metadata_read, XSD.boolean)
+        rdf.add (graph, collaborator_uri, rdf.DJHT["metadata_edit"], metadata_edit, XSD.boolean)
+        rdf.add (graph, collaborator_uri, rdf.DJHT["data_read"],     data_read,     XSD.boolean)
+        rdf.add (graph, collaborator_uri, rdf.DJHT["data_edit"],     data_edit,     XSD.boolean)
+        rdf.add (graph, collaborator_uri, rdf.DJHT["data_remove"],   data_remove,   XSD.boolean)
+        rdf.add (graph, collaborator_uri, rdf.DJHT["account"],       rdf.uuid_to_uri(collaborator_uuid, "account"),  "uri")
+
+        if self.add_triples_from_graph (graph):
+            existing_collaborators = self.collaborators (dataset_uuid)
+            if existing_collaborators:
+                last_collaborator = existing_collaborators [-1]
+                last_node = conv.value_or_none(last_collaborator, "originating_blank_node")
+                new_index = conv.value_or (last_collaborator, "order_index", 0) +1
+                new_node = self.wrap_in_blank_node(collaborator_uri, index=new_index)
+
+                if self.append_to_list(last_node, new_node):
+                    return rdf.uri_to_uuid (collaborator_uri)
+
+                self.log.error ("failed to append %s to list of collaborators ", collaborator_uri)
+                return None
+
+            collaborators = [URIRef(collaborator_uri)]
+            if self.update_item_list (dataset_uuid, account_uuid, collaborators, "collaborators"):
+                collaborators = self.collaborators(dataset_uuid)
+                for collaborator in collaborators:
+                    self.cache.invalidate_by_prefix(f"datasets_{collaborator['account_uuid']}")
+
+                return rdf.uri_to_uuid (collaborator_uri)
+
+            self.log.error("failed to create collaborator list for %s ", collaborator_uri)
+        return None
+
+    def remove_collaborator (self, dataset_uuid, collaborator_uuid):
+        "Procedure to remove a collaborator from the state graph."
+
+        query = self.__query_from_template("delete_collaborator", {
+            "dataset_uuid": dataset_uuid,
+            "collaborator_uuid": collaborator_uuid
+        })
+
+        self.cache.invalidate_by_prefix(f"datasets_{dataset_uuid}")
+        self.cache.invalidate_by_prefix("datasets")
+        return self.__run_logged_query (query)
 
     def insert_private_link (self, item_uuid, account_uuid, whom=None, purpose=None, item_type=None,
                              read_only=True, id_string=None,
@@ -1756,6 +1824,7 @@ class SparqlInterface:
     def delete_dataset_draft (self, container_uuid, dataset_uuid, account_uuid):
         """Remove the draft dataset from a container in the state graph."""
 
+        collaborators = self.collaborators(dataset_uuid)
         query   = self.__query_from_template ("delete_dataset_draft", {
             "account_uuid":        account_uuid,
             "container_uri":       rdf.uuid_to_uri (container_uuid, "container")
@@ -1765,6 +1834,9 @@ class SparqlInterface:
         self.cache.invalidate_by_prefix (f"{account_uuid}_storage")
         self.cache.invalidate_by_prefix (f"{dataset_uuid}_dataset_storage")
         self.cache.invalidate_by_prefix (f"datasets_{account_uuid}")
+
+        for collaborator in collaborators:
+            self.cache.invalidate_by_prefix(f"datasets_{collaborator['account_uuid']}")
 
         is_under_review = self.dataset_is_under_review (dataset_uuid)
         if is_under_review:
@@ -2113,6 +2185,10 @@ class SparqlInterface:
             "container_doi":   rdf.escape_string_value (container_doi),
             "first_online_date": first_online_date_str
         })
+
+        collaborators = self.collaborators(dataset_uuid)
+        for collaborator in collaborators:
+            self.cache.invalidate_by_prefix(f"datasets_{collaborator['account_uuid']}")
 
         self.cache.invalidate_by_prefix (f"datasets_{account_uuid}")
         self.cache.invalidate_by_prefix ("datasets")
@@ -2729,7 +2805,8 @@ class SparqlInterface:
 
     def accounts (self, account_uuid=None, order=None, order_direction=None,
                   limit=None, offset=None, is_active=None, email=None,
-                  id_lte=None, id_gte=None, institution_user_id=None):
+                  id_lte=None, id_gte=None, institution_user_id=None,
+                  search_for=None):
         """Returns accounts."""
 
         query = self.__query_from_template ("accounts", {
@@ -2737,6 +2814,7 @@ class SparqlInterface:
             "is_active": is_active,
             "email": rdf.escape_string_value(email),
             "institution_user_id": rdf.escape_string_value (institution_user_id),
+            "search_for": rdf.escape_string_value (search_for),
             "minimum_account_id": id_gte,
             "maximum_account_id": id_lte,
         })

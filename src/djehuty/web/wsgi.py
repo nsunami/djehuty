@@ -78,6 +78,7 @@ class ApiServer:
         self.show_science_categories = True
         self.show_latest_datasets = True
         self.disable_2fa      = False
+        self.disable_collaboration = False
         self.automatic_login_email = None
         self.small_footer     = (
             '<div id="footer-wrapper2"><p>This repository is powered by '
@@ -99,6 +100,7 @@ class ApiServer:
         self.datacite_id         = None
         self.datacite_password   = None
         self.datacite_prefix     = None
+        self.ssi_psk             = None
         self.log_access          = self.log_access_directly
         self.log                 = logging.getLogger(__name__)
         self.locks               = locks.Locks()
@@ -299,6 +301,7 @@ class ApiServer:
             ## V3 API
             ## ----------------------------------------------------------------
             R("/v3/datasets",                                                    self.api_v3_datasets),
+            R("/v3/datasets/codemeta",                                           self.api_v3_datasets_codemeta),
             R("/v3/datasets/top/<item_type>",                                    self.api_v3_datasets_top),
             R("/v3/datasets/<dataset_id>/submit-for-review",                     self.api_v3_dataset_submit),
             R("/v3/datasets/<dataset_id>/publish",                               self.api_v3_dataset_publish),
@@ -327,6 +330,9 @@ class ApiServer:
             R("/v3/profile/picture",                                             self.api_v3_profile_picture),
             R("/v3/profile/picture/<account_uuid>",                              self.api_v3_profile_picture_for_account),
             R("/v3/tags/search",                                                 self.api_v3_tags_search),
+            R("/v3/datasets/<dataset_uuid>/collaborators",                       self.api_v3_dataset_collaborators),
+            R("/v3/datasets/<dataset_uuid>/collaborators/<collaborator_uuid>",   self.api_v3_dataset_remove_collaborator),
+            R("/v3/accounts/search",                                             self.api_v3_accounts_search),
 
             ## Data model exploratory
             ## ----------------------------------------------------------------
@@ -345,6 +351,11 @@ class ApiServer:
             R("/v3/datasets/<git_uuid>.git/info/refs",                           self.api_v3_private_dataset_git_refs),
             R("/v3/datasets/<git_uuid>.git/git-upload-pack",                     self.api_v3_private_dataset_git_upload_pack),
             R("/v3/datasets/<git_uuid>.git/git-receive-pack",                    self.api_v3_private_dataset_git_receive_pack),
+
+            ## ----------------------------------------------------------------
+            ## SHARED SUBMIT INTERFACE API
+            ## ----------------------------------------------------------------
+            R("/v3/receive-from-ssi",                                            self.api_v3_receive_from_ssi),
         ])
 
         ## Static resources and HTML templates.
@@ -385,6 +396,12 @@ class ApiServer:
 
     def __call__ (self, environ, start_response):
         return self.wsgi (environ, start_response)
+
+    def __is_reviewing (self, request):
+        token = self.__impersonator_token (request)
+        if token is None:
+            return False
+        return self.db.may_review (token)
 
     def __impersonator_token (self, request):
         return self.token_from_cookie (request, self.impersonator_cookie_key)
@@ -859,14 +876,14 @@ class ApiServer:
         except IndexError:
             return None
 
-    def __paging_offset_and_limit (self, request):
+    def __paging_offset_and_limit (self, request, error_list=None):
         """Return the OFFSET and LIMIT from paging parameters."""
         return validator.paging_to_offset_and_limit ({
             "page":      self.get_parameter (request, "page"),
             "page_size": self.get_parameter (request, "page_size"),
             "limit":     self.get_parameter (request, "limit"),
             "offset":    self.get_parameter (request, "offset")
-        })
+        }, error_list=error_list)
 
     def __default_dataset_api_parameters (self, request):
 
@@ -1423,7 +1440,7 @@ class ApiServer:
                         # so we construct an artificial one that doesn't
                         # resolve so no accidental e-mails will be sent.
                         email      = email,
-                        full_name  = orcid_record["name"]
+                        common_name = orcid_record["name"]
                     )
                     if not account_uuid:
                         return self.error_500 ()
@@ -1477,7 +1494,8 @@ class ApiServer:
                         account_uuid = self.db.insert_account (
                             email      = saml_record["email"],
                             first_name = value_or_none (saml_record, "first_name"),
-                            last_name  = value_or_none (saml_record, "last_name")
+                            last_name  = value_or_none (saml_record, "last_name"),
+                            common_name = value_or_none (saml_record, "common_name"),
                         )
                         self.log.access ("Account %s created via SAML.", account_uuid) #  pylint: disable=no-member
 
@@ -1775,6 +1793,10 @@ class ApiServer:
             if dataset is None:
                 return self.error_403 (request)
 
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_read", False)):
+                return self.error_403 (request)
+
             # Pre-Djehuty datasets may not have a Git UUID. We therefore
             # assign one when needed.
             if "git_uuid" not in dataset:
@@ -1799,6 +1821,7 @@ class ApiServer:
                 request,
                 "depositor/edit-dataset.html",
                 container_uuid = dataset["container_uuid"],
+                disable_collaboration = self.disable_collaboration,
                 article    = dataset,
                 account    = account,
                 categories = categories,
@@ -1822,6 +1845,10 @@ class ApiServer:
                                                    is_published=False)
 
             if dataset is None:
+                return self.error_403 (request)
+
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_remove", False)):
                 return self.error_403 (request)
 
             container_uuid = dataset["container_uuid"]
@@ -2178,6 +2205,134 @@ class ApiServer:
         response   = redirect (request.referrer, code=302)
         self.db.delete_session_by_uuid (account_uuid, session_uuid)
         return response
+
+    def api_v3_dataset_collaborators (self, request, dataset_uuid):
+        """Implements /v3/datasets/dataset_uuid/collaborator"""
+
+        if not self.accepts_json (request):
+            return self.error_406 ("application/json")
+
+        account_uuid = self.account_uuid_from_request (request)
+        if account_uuid is None:
+            return self.error_authorization_failed (request)
+
+        if not validator.is_valid_uuid (dataset_uuid):
+            return self.error_404 (request)
+
+        try:
+            dataset = self.db.datasets (container_uuid=dataset_uuid,
+                                        account_uuid=account_uuid,
+                                        is_published=None,
+                                        is_latest=None,
+                                        limit=1)[0]
+        except IndexError:
+            return self.error_403 (request)
+
+        if dataset is None:
+            return self.error_403 (request)
+
+        if request.method == "GET":
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_read", False)):
+                return self.error_403 (request)
+
+            collaborators = self.db.collaborators (dataset["uuid"])
+            return self.default_list_response (collaborators, formatter.format_collaborator_record)
+
+        if request.method == "POST":
+            if value_or (dataset, "is_shared_with_me", False):
+                return self.error_403 (request)
+
+            try:
+                parameters = request.get_json()
+                metadata = parameters["metadata"]
+                data = parameters["data"]
+                collaborator_account_uuid = validator.string_value (parameters, "account")
+
+                if not validator.is_valid_uuid (collaborator_account_uuid):
+                    raise validator.InvalidValueType(
+                        field_name = "account",
+                        message = "Expected a valid UUID for 'account'",
+                        code = "WrongValueType"
+                    )
+
+            except validator.ValidationException as error:
+                return self.error_400(request, error.message, error.code)
+
+            account = self.db.account_by_uuid (collaborator_account_uuid)
+            if account is None:
+                self.log.error ("Requesting collaborator account uuid failed. ")
+
+            collaborators = self.db.insert_collaborator (dataset["uuid"],
+                                                         collaborator_account_uuid,
+                                                         account_uuid,
+                                                         metadata["read"],
+                                                         metadata["edit"],
+                                                         data["read"],
+                                                         data["edit"],
+                                                         data["remove"],
+                                                         )
+
+            if collaborators is None:
+                self.log.error ("Inserting collaborator failed. ")
+                return self.error_500()
+
+            return self.respond_205()
+
+        return self.error_500 ()
+
+    def api_v3_accounts_search (self, request):
+        """Search and autocomplete to add collaborator"""
+        if not self.accepts_json(request):
+            return self.error_406("application/json")
+
+        account_uuid = self.account_uuid_from_request(request)
+        if account_uuid is None:
+            return self.error_authorization_failed(request)
+
+        if request.method != "POST":
+            return self.error_405 ("POST")
+
+        try:
+            parameters = request.get_json()
+            search_for = validator.string_value (parameters, "search_for", 0, 32, required=True)
+            accounts   = self.db.accounts (search_for=search_for, limit=5)
+            return self.default_list_response (accounts, formatter.format_account_details_record)
+        except (validator.ValidationException, KeyError) as error:
+            return self.error_400(request, error.message, error.code)
+
+    def api_v3_dataset_remove_collaborator (self, request, dataset_uuid, collaborator_uuid):
+        """Removes the collaborator from the share section of edit dataset form."""
+        if not self.accepts_json (request):
+            return self.error_406 ("application/json")
+
+        account_uuid = self.account_uuid_from_request (request)
+        if account_uuid is None:
+            return self.error_authorization_failed (request)
+
+        if (not validator.is_valid_uuid (dataset_uuid) or
+            not validator.is_valid_uuid (collaborator_uuid)):
+            return self.error_404 (request)
+
+        try:
+            dataset = self.db.datasets (container_uuid=dataset_uuid,
+                                        account_uuid=account_uuid,
+                                        is_published=False,
+                                        is_latest=None,
+                                        limit=1)[0]
+
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_edit", False)):
+                return self.error_403 (request)
+
+            if self.db.remove_collaborator (dataset["uuid"], collaborator_uuid) is None:
+                return self.error_500()
+
+            return self.respond_204()
+        except IndexError:
+            pass
+
+        return self.error_403 (request)
 
     def ui_dataset_new_private_link (self, request, dataset_uuid):
         """Implements /my/datasets/<uuid>/private_link/new."""
@@ -3366,7 +3521,11 @@ class ApiServer:
                 self.log.error ("File download failed due to missing metadata.")
                 return self.error_500 ()
 
-            self.__log_event (request, dataset["container_uuid"], "dataset", "download")
+            if self.__is_reviewing (request):
+                self.__log_event (request, dataset["container_uuid"], "dataset", "reviewerDownload")
+            else:
+                self.__log_event (request, dataset["container_uuid"], "dataset", "download")
+
             return send_file (file_path,
                               request.environ,
                               "application/octet-stream",
@@ -3411,7 +3570,12 @@ class ApiServer:
             filename = f'"{safe_title}_{version}_all.zip"'
 
             response.headers["Content-disposition"] = f"attachment; filename={filename}"
-            self.__log_event (request, dataset["container_uuid"], "dataset", "download")
+
+            if self.__is_reviewing (request):
+                self.__log_event (request, dataset["container_uuid"], "dataset", "reviewerDownload")
+            else:
+                self.__log_event (request, dataset["container_uuid"], "dataset", "download")
+
             return response
 
         except (FileNotFoundError, KeyError, IndexError, TypeError) as error:
@@ -3650,6 +3814,10 @@ class ApiServer:
 
         try:
             dataset         = self.__dataset_by_id_or_uri (dataset_id, account_uuid=None, is_latest=True)
+
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_read", False)):
+                return self.error_403 (request)
 
             # Passing along the base_url here to generate the API links.
             dataset["base_url"] = self.base_url
@@ -3914,6 +4082,10 @@ class ApiServer:
                 if dataset_uri is None:
                     return self.response ("[]")
 
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_read", False)):
+                    return self.error_403 (request)
+
                 dataset["doi"]  = self.__standard_doi (dataset["container_uuid"],
                                                        version = None,
                                                        container_doi = value_or_none (dataset, "container_doi"))
@@ -3964,6 +4136,10 @@ class ApiServer:
                                                        is_published = False)
 
                 if dataset is None:
+                    return self.error_403 (request)
+
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_edit", False)):
                     return self.error_403 (request)
 
                 is_embargoed = validator.boolean_value (record, "is_embargoed", when_none=False)
@@ -4033,6 +4209,10 @@ class ApiServer:
                                                            account_uuid=account_uuid,
                                                            is_published=False)
 
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_remove", False)):
+                    return self.error_403 (request)
+
                 container_uuid = dataset["container_uuid"]
                 if self.db.delete_dataset_draft (container_uuid, dataset["uuid"], account_uuid):
                     return self.respond_204()
@@ -4058,6 +4238,10 @@ class ApiServer:
                                                        account_uuid=account_uuid,
                                                        is_published=False)
 
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_read", False)):
+                    return self.error_403 (request)
+
                 authors = self.db.authors (item_uri   = dataset["uri"],
                                            account_uuid = account_uuid,
                                            is_published = False,
@@ -4076,6 +4260,17 @@ class ApiServer:
             parameters = request.get_json()
 
             try:
+                dataset = self.__dataset_by_id_or_uri (dataset_id,
+                                                       account_uuid=account_uuid,
+                                                       is_published=False)
+
+                if dataset is None:
+                    return self.error_403 (request)
+
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_edit", False)):
+                    return self.error_403 (request)
+
                 new_authors = []
                 records     = parameters["authors"]
                 for record in records:
@@ -4099,10 +4294,6 @@ class ApiServer:
                             self.log.error ("Adding a single author failed.")
                             return self.error_500()
                     new_authors.append(URIRef(uuid_to_uri (author_uuid, "author")))
-
-                dataset = self.__dataset_by_id_or_uri (dataset_id,
-                                                       account_uuid=account_uuid,
-                                                       is_published=False)
 
                 # The PUT method overwrites the existing authors, so we can
                 # keep an empty starting list. For POST we must retrieve the
@@ -4155,6 +4346,10 @@ class ApiServer:
             if dataset is None:
                 return self.error_403 (request)
 
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_edit", False)):
+                return self.error_403 (request)
+
             authors = self.db.authors (item_uri     = dataset["uri"],
                                        account_uuid = account_uuid,
                                        is_published = False,
@@ -4196,6 +4391,10 @@ class ApiServer:
                 if item is None:
                     return self.error_403 (request)
 
+                if not (not value_or (item, "is_shared_with_me", False) or
+                        value_or (item, "metadata_read", False)):
+                    return self.error_403 (request)
+
                 funding = self.db.fundings (item_uri     = item["uri"],
                                             account_uuid = account_uuid,
                                             is_published = False,
@@ -4219,6 +4418,10 @@ class ApiServer:
                                              is_published=False)
 
                 if item is None:
+                    return self.error_403 (request)
+
+                if not (not value_or (item, "is_shared_with_me", False) or
+                        value_or (item, "metadata_edit", False)):
                     return self.error_403 (request)
 
                 new_fundings = []
@@ -4299,6 +4502,10 @@ class ApiServer:
                                            is_published = False)
 
             if item is None:
+                return self.error_403 (request)
+
+            if not (not value_or (item, "is_shared_with_me", False) or
+                    value_or (item, "metadata_remove", False)):
                 return self.error_403 (request)
 
             fundings = self.db.fundings (item_uri     = item["uri"],
@@ -4441,6 +4648,10 @@ class ApiServer:
                                                        account_uuid = account_uuid,
                                                        is_published = False)
 
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_edit", False)):
+                    return self.error_403 (request)
+
                 # First, validate all values passed by the user.
                 # This way, we can be as certain as we can be that performing
                 # a PUT will not end in having no categories associated with
@@ -4508,6 +4719,10 @@ class ApiServer:
             if not dataset:
                 return self.response ("[]")
 
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "metadata_read", False)):
+                return self.error_403 (request)
+
             return self.response (json.dumps (formatter.format_dataset_embargo_record (dataset)))
 
         if request.method == 'DELETE':
@@ -4515,6 +4730,10 @@ class ApiServer:
                 dataset = self.__dataset_by_id_or_uri (dataset_id,
                                                        account_uuid = account_uuid,
                                                        is_published = False)
+
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "metadata_remove", False)):
+                    return self.error_403 (request)
 
                 if self.db.delete_dataset_embargo (dataset_uri = dataset["uri"],
                                                    account_uuid = account_uuid):
@@ -4540,6 +4759,10 @@ class ApiServer:
                                                              account_uuid=account_uuid,
                                                              is_published=False)
                 if dataset is None:
+                    return self.error_403 (request)
+
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "data_read", False)):
                     return self.error_403 (request)
 
                 files = self.db.dataset_files (
@@ -4602,6 +4825,10 @@ class ApiServer:
                 if dataset is None:
                     return self.error_403 (request)
 
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "data_edit", False)):
+                    return self.error_403 (request)
+
                 if link is not None:
                     file_id = self.db.insert_file (
                         dataset_uri        = dataset["uri"],
@@ -4658,6 +4885,10 @@ class ApiServer:
                 if dataset is None:
                     return self.error_404 (request)
 
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "data_read", False)):
+                    return self.error_403 (request)
+
                 metadata = self.__file_by_id_or_uri (file_id,
                                                      account_uuid = account_uuid,
                                                      dataset_uri = dataset["uri"])
@@ -4678,6 +4909,10 @@ class ApiServer:
                                                        is_published=False)
 
                 if dataset is None:
+                    return self.error_403 (request)
+
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "data_remove", False)):
                     return self.error_403 (request)
 
                 metadata = self.__file_by_id_or_uri (file_id,
@@ -4716,6 +4951,9 @@ class ApiServer:
             if dataset is None:
                 return self.error_404 (request)
 
+            if value_or (dataset, "is_shared_with_me", False):
+                return self.error_403 (request)
+
             links = self.db.private_links (item_uri   = dataset["uri"],
                                            account_uuid = account_uuid)
 
@@ -4729,6 +4967,9 @@ class ApiServer:
                                                             account_uuid = account_uuid)
                 if dataset is None:
                     return self.error_404 (request)
+
+                if value_or (dataset, "is_shared_with_me", False):
+                    return self.error_403 (request)
 
                 id_string = secrets.token_urlsafe()
                 expires_date = validator.date_value (parameters, "expires_date", False)
@@ -4791,6 +5032,10 @@ class ApiServer:
             return self.error_404 (request)
 
         if request.method in ("GET", "HEAD"):
+
+            if value_or (dataset, "is_shared_with_me", False):
+                return self.error_403 (request)
+
             links = self.db.private_links (
                         item_uri   = dataset["uri"],
                         id_string  = link_id,
@@ -4799,6 +5044,10 @@ class ApiServer:
             return self.default_list_response (links, formatter.format_private_links_record)
 
         if request.method == 'PUT':
+
+            if value_or (dataset, "is_shared_with_me", False):
+                return self.error_403 (request)
+
             parameters = request.get_json()
             try:
                 result = self.db.update_private_link (
@@ -4819,6 +5068,10 @@ class ApiServer:
                 return self.error_400 (request, error.message, error.code)
 
         if request.method == 'DELETE':
+
+            if value_or (dataset, "is_shared_with_me", False):
+                return self.error_403 (request)
+
             result = self.db.delete_private_links (dataset["container_uuid"],
                                                    account_uuid,
                                                    link_id)
@@ -4935,6 +5188,7 @@ class ApiServer:
                         organizations               = value_or_none (item, "organizations"),
                         resource_title              = value_or_none (item, "resource_title"),
                         resource_doi                = value_or_none (item, "resource_doi"),
+                        embargo_until_date          = value_or_none (item, "embargo_until_date"),
                         agreed_to_deposit_agreement = value_or (item, "agreed_to_deposit_agreement", False),
                         agreed_to_publish           = value_or (item, "agreed_to_publish", False),
                         is_metadata_record          = value_or (item, "is_metadata_record", False),
@@ -4967,6 +5221,10 @@ class ApiServer:
                                                account_uuid = account_uuid)
 
         if dataset is None:
+            return self.error_403 (request)
+
+        if not (not value_or (dataset, "is_shared_with_me", False) or
+                value_or (dataset, "metadata_edit", False)):
             return self.error_403 (request)
 
         reserved_doi = self.__reserve_and_save_doi (account_uuid, dataset)
@@ -5760,6 +6018,41 @@ class ApiServer:
         return self.default_list_response (records, formatter.format_dataset_record,
                                            base_url = self.base_url)
 
+    def api_v3_datasets_codemeta (self, request):
+        """Implements /v3/datasets/codemeta."""
+
+        try:
+            errors          = []
+            offset, limit   = self.__paging_offset_and_limit (request, error_list=errors)
+            modified_since  = validator.string_value (request.args, "modified_since", 0, 32, False, error_list=errors)
+            order           = validator.string_value (request.args, "order", 0, 255, False, error_list=errors)
+            order_direction = validator.order_direction (request.args, "order_direction", False, error_list=errors)
+            if errors:
+                return self.error_400_list (request, errors)
+
+            datasets = self.db.datasets (is_published = True,
+                                         is_latest    = True,
+                                         is_software  = True,
+                                         modified_since = modified_since,
+                                         order        = order,
+                                         order_direction = order_direction,
+                                         limit        = limit,
+                                         offset       = offset)
+
+            output = []
+            for dataset in datasets:
+                output.append (formatter.format_codemeta_record (
+                    dataset,
+                    git_url = self.__git_repository_url_for_dataset (dataset),
+                    tags = self.db.tags(item_uri=dataset["uri"], limit=None),
+                    authors = self.db.authors (item_uri=dataset["uri"],
+                                               is_published = True,
+                                               item_type = "dataset",
+                                               limit = 10000)))
+            return self.response (json.dumps(output))
+        except validator.ValidationException as error:
+            return self.error_400 (request, error.message, error.code)
+
     def __api_v3_datasets_parameters (self, request, item_type):
         record = {}
         record["dataset_id"]      = self.get_parameter (request, "id")
@@ -5900,7 +6193,7 @@ class ApiServer:
 
         return branch_name
 
-    def __git_repository_by_dataset_id (self, account_uuid, dataset_id):
+    def __git_repository_by_dataset_id (self, account_uuid, dataset_id, action="read"):
         """Deduplication for api_v3_datasets_git_[branches|files]."""
 
         dataset = self.__dataset_by_id_or_uri (dataset_id,
@@ -5909,6 +6202,10 @@ class ApiServer:
 
         if dataset is None:
             self.log.error ("No Git repository for dataset %s.", dataset_id)
+            return None
+
+        if not (not value_or (dataset, "is_shared_with_me", False) or
+                value_or (dataset, f"data_{action}", False)):
             return None
 
         # Pre-Djehuty datasets may not have a Git UUID. We therefore
@@ -5960,7 +6257,7 @@ class ApiServer:
         except validator.ValidationException as error:
             return self.error_400 (request, error.message, error.code)
 
-        git_repository = self.__git_repository_by_dataset_id (account_uuid, dataset_id)
+        git_repository = self.__git_repository_by_dataset_id (account_uuid, dataset_id, "edit")
         if git_repository is None:
             return self.error_404 (request)
 
@@ -5978,7 +6275,7 @@ class ApiServer:
         if account_uuid is None:
             return self.error_authorization_failed(request)
 
-        git_repository = self.__git_repository_by_dataset_id (account_uuid, dataset_id)
+        git_repository = self.__git_repository_by_dataset_id (account_uuid, dataset_id, "read")
         if git_repository is None:
             return self.error_404 (request)
 
@@ -5998,7 +6295,7 @@ class ApiServer:
         if account_uuid is None:
             return self.error_authorization_failed(request)
 
-        git_repository = self.__git_repository_by_dataset_id (account_uuid, dataset_id)
+        git_repository = self.__git_repository_by_dataset_id (account_uuid, dataset_id, "read")
         if git_repository is None:
             return self.error_404 (request)
 
@@ -6212,6 +6509,9 @@ class ApiServer:
         if dataset is None:
             self.locks.unlock (locks.LockTypes.SUBMIT_DATASET)
             return self.error_404 (request)
+
+        if value_or (dataset, "is_shared_with_me", False):
+            return self.error_403 (request)
 
         record = request.get_json()
         try:
@@ -6509,6 +6809,10 @@ class ApiServer:
             if dataset is None:
                 return self.error_403 (request)
 
+            if not (not value_or (dataset, "is_shared_with_me", False) or
+                    value_or (dataset, "data_edit", False)):
+                return self.error_403 (request)
+
             content_type = value_or (request.headers, "Content-Type", "")
             if not content_type.startswith ("multipart/form-data"):
                 return self.error_415 (["multipart/form-data"])
@@ -6761,6 +7065,10 @@ class ApiServer:
         if metadata is None:
             return self.error_404 (request)
 
+        if not (not value_or (metadata, "is_shared_with_me", False) or
+                value_or (metadata, "data_read", False)):
+            return self.error_403 (request)
+
         try:
             metadata["base_url"] = self.base_url
             return self.response (json.dumps (formatter.format_file_details_record (metadata)))
@@ -6838,6 +7146,10 @@ class ApiServer:
                                                account_uuid=account_uuid,
                                                is_published=False)
 
+        if not (not value_or (dataset, "is_shared_with_me", False) or
+                value_or (dataset, "metadata_read", False)):
+            return self.error_403 (request)
+
         return self.__api_v3_item_references (request, dataset)
 
     def api_v3_collection_references (self, request, collection_id):
@@ -6866,6 +7178,10 @@ class ApiServer:
             item  = item_by_id_procedure (item_id,
                                           account_uuid=account_uuid,
                                           is_published=False)
+
+            if not (not value_or (item, "is_shared_with_me", False) or
+                    value_or (item, "metadata_read", False)):
+                return self.error_403 (request)
 
             tags = self.db.tags (
                 item_uri        = item["uri"],
@@ -7102,6 +7418,9 @@ class ApiServer:
                 dataset = self.db.datasets (git_uuid = git_uuid, is_published=False)[0]
 
             if dataset is not None:
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "data_edit", False)):
+                    return self.error_403 (request)
                 return self.__git_passthrough (request)
         except IndexError:
             pass
@@ -7118,6 +7437,10 @@ class ApiServer:
                                             is_latest    = None)[0]
 
             if dataset is not None:
+                if not (not value_or (dataset, "is_shared_with_me", False) or
+                        value_or (dataset, "data_read", False)):
+                    return self.error_403 (request)
+
                 self.__log_event (request, dataset["container_uuid"], "dataset", "gitDownload")
                 return self.__git_passthrough (request)
         except IndexError:
@@ -7378,6 +7701,66 @@ class ApiServer:
             pass
 
         return self.error_404 (request)
+
+    def api_v3_receive_from_ssi (self, request):
+        """Implements /v3/receive-from-ssi."""
+        if self.ssi_psk is None:
+            return self.error_404 (request)
+
+        if request.method != "PUT":
+            return self.error_405 ("PUT")
+
+        if not self.accepts_json (request):
+            return self.error_406 ("application/json")
+
+        record = request.get_json()
+        if value_or_none (record, "psk") != self.ssi_psk:
+            return self.error_403 (request)
+
+        errors = []
+        title       = validator.string_value (record, "title", 0, 255, True, errors)
+        email       = validator.string_value (record, "email", 0, 255, True, errors)
+
+        if errors:
+            return self.error_400_list (request, errors)
+
+        # Gather account information.
+        account = self.db.account_by_email (email)
+        account_uuid = None
+        if account is None:
+            # Create an account.
+            account_uuid = self.db.insert_account (email=email)
+            if not account_uuid:
+                self.log.error ("Failed to create account for SSI user %s.", email)
+                return self.error_500 ()
+            self.log.access ("Account %s created via SSI.", account_uuid) #  pylint: disable=no-member
+            author_uuid = self.db.insert_author (
+                email        = email,
+                account_uuid = account_uuid,
+                is_active    = True,
+                is_public    = True)
+            if not author_uuid:
+                self.log.error ("Failed to link author to new account for %s.", email)
+                return self.error_500 ()
+        else:
+            account_uuid = account["uuid"]
+
+        token, _, session_uuid = self.db.insert_session (account_uuid, name="Login via SSI")
+        if session_uuid is None:
+            self.log.error ("Failed to create a session for account %s.", account_uuid)
+            return self.error_500 ()
+        self.log.access ("Created session %s for account %s.", session_uuid, account_uuid) #  pylint: disable=no-member
+
+        container_uuid, _ = self.db.insert_dataset (
+            title = title,
+            account_uuid = account_uuid)
+        if container_uuid is None:
+            self.log.error ("Failed to create dataset for account %s.", account_uuid)
+            return self.error_500 ()
+
+        response = redirect (f"/my/datasets/{container_uuid}/edit", code=302)
+        response.set_cookie (key=self.cookie_key, value=token, secure=self.in_production)
+        return response
 
     ## ------------------------------------------------------------------------
     ## EXPORTS
