@@ -453,5 +453,5 @@ def format_group_record (record):
 def format_log_entry_record (record):
     """Record formatter for log_entry."""
     return {
-      "created":          conv.value_or_none(record, "created"),
+      "created":       conv.value_or_none(record, "created"),
     }

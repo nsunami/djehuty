@@ -9,13 +9,6 @@ WHERE {
     ?log_entry djht:dataset ?container_id .
   }
 {% if filters is not none %}{{ filters | safe }}
-
 {% endif %}
 }
 {% endblock %}
-#INSERT DATA { GRAPH <djehuty://local> { <log-entry:97a17e40-0870-4411-b866-32c485206409> <https://ontologies.data.4tu.nl/djehuty/0.0.1/event_type> <https://ontologies.data.4tu.nl/djehuty/0.0.1/LogEntryView> .
-#<log-entry:97a17e40-0870-4411-b866-32c485206409> <https://ontologies.data.4tu.nl/djehuty/0.0.1/ip_address> "127.0.0.1"^^<http://www.w3.org/2001/XMLSchema#string> .
-#<log-entry:97a17e40-0870-4411-b866-32c485206409> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://ontologies.data.4tu.nl/djehuty/0.0.1/LogEntry> .
-#<log-entry:97a17e40-0870-4411-b866-32c485206409> <https://ontologies.data.4tu.nl/djehuty/0.0.1/created> "2024-02-27T14:01:55+00:00"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
-#<log-entry:97a17e40-0870-4411-b866-32c485206409> <https://ontologies.data.4tu.nl/djehuty/0.0.1/dataset> <container:885c2d7a-c527-4b15-bae0-cb0be78d9301> .
-# } }
