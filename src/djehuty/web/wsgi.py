@@ -6983,14 +6983,6 @@ class ApiServer:
                 event_type      =  event_type,
                 start_date      =  validator.string_value(request.args, "start_date"),
                 end_date        =  validator.string_value(request.args, "end_date")
-                # group_id        = validator.integer_value (request.args, "id"),
-                # parent_id       = validator.integer_value (request.args, "parent_id"),
-                # name            = validator.string_value  (request.args, "name", 0, 255),
-                # association     = validator.string_value  (request.args, "association", 0, 255),
-                # limit           = validator.integer_value (request.args, "limit"),
-                # offset          = validator.integer_value (request.args, "offset"),
-                # order           = validator.integer_value (request.args, "order"),
-                # order_direction = validator.order_direction (request.args, "order_direction")
                 )
 
             return self.default_list_response (records, formatter.format_log_entry_record)

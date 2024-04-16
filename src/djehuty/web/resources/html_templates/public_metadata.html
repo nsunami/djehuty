@@ -1,7 +1,6 @@
 {% block public_metadata  %}
 <script src="/static/js/d3.v7.min.js"></script>
 <script src="../static/js/metrics_plot.js"></script>
-
 <h2>{{item.title}}</h2>
 
 {% if item.is_embargoed: %}
@@ -152,11 +151,8 @@
                     toggleButton(defaultViewPlot, 'views');
                 };
             </script>
-
         </div>
 {% endif %}
-       
-
         <div id="categories">
             <div class="label">categories</div>
             <ul>
@@ -275,7 +271,7 @@
                   <li>{{date}} {{dtype}}</li>
             </ul>
 {% endfor %}
-</div>
+        </div>
 {% if item.publisher %}
         <div id="publisher">
             <div class="label">publisher</div>
