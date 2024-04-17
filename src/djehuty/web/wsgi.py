@@ -37,7 +37,7 @@ from djehuty.utils.convenience import value_or, value_or_none, deduplicate_list
 from djehuty.utils.convenience import self_or_value_or_none, parses_to_int
 from djehuty.utils.convenience import make_citation, is_opendap_url, landing_page_url
 from djehuty.utils.convenience import split_author_name, split_delimited_string
-from djehuty.utils.constants import group_to_member, member_url_names
+from djehuty.utils.constants import group_to_member, member_url_names, filetypes_by_extension
 from djehuty.utils.rdf import uuid_to_uri, uri_to_uuid, uris_from_records
 
 ## Error handling for loading python3-saml is done in 'ui'.
@@ -62,6 +62,8 @@ class ApiServer:
         self.base_url         = f"http://{address}:{port}"
         self.site_name        = ""
         self.site_description = ""
+        self.site_shorttag    = ""
+        self.support_email_address = ""
         self.db               = database.SparqlInterface()  # pylint: disable=invalid-name
         self.email            = email_handler.EmailInterface()
         self.cookie_key       = "djehuty_session"
@@ -110,6 +112,13 @@ class ApiServer:
         self.log                 = logging.getLogger(__name__)
         self.locks               = locks.Locks()
         self.menu = []
+        self.colors = {
+            "primary-color":           "#f49120",
+            "primary-color-hover":     "#d26000",
+            "primary-color-active":    "#9d4800",
+            "privilege-button-color":  "#fce3bf",
+            "footer-background-color": "#707070"
+        }
         self.static_pages = {}
 
         ## Routes to all reachable pages and API calls.
@@ -123,6 +132,8 @@ class ApiServer:
             R("/portal",                                                         self.ui_redirect_to_home),
             R("/browse",                                                         self.ui_redirect_to_home),
             R("/robots.txt",                                                     self.robots_txt),
+            R("/theme/colors.css",                                               self.colors_css),
+            R("/theme/loader.svg",                                               self.loader_svg),
             R("/login",                                                          self.ui_login),
             R("/account/home",                                                   self.ui_account_home),
             R("/logout",                                                         self.ui_logout),
@@ -353,12 +364,20 @@ class ApiServer:
             ## ----------------------------------------------------------------
             R("/v3/datasets/<dataset_uuid>/assign-reviewer/<reviewer_uuid>",     self.api_v3_datasets_assign_reviewer),
 
+            ## Administrative
+            ## ----------------------------------------------------------------
+            R("/v3/admin/files-integrity-statistics",                            self.api_v3_admin_files_integrity_statistics),
+            R("/v3/admin/accounts/clear-cache",                                  self.api_v3_admin_accounts_clear_cache),
+
             ## ----------------------------------------------------------------
             ## GIT HTTP API
             ## ----------------------------------------------------------------
+            R("/v3/datasets/<git_uuid>.git",                                     self.api_v3_private_dataset_git_instructions),
             R("/v3/datasets/<git_uuid>.git/info/refs",                           self.api_v3_private_dataset_git_refs),
             R("/v3/datasets/<git_uuid>.git/git-upload-pack",                     self.api_v3_private_dataset_git_upload_pack),
             R("/v3/datasets/<git_uuid>.git/git-receive-pack",                    self.api_v3_private_dataset_git_receive_pack),
+            R("/v3/datasets/<git_uuid>.git/languages",                           self.api_v3_dataset_git_languages),
+            R("/v3/datasets/<git_uuid>.git/contributors",                        self.api_v3_dataset_git_contributors),
 
             ## ----------------------------------------------------------------
             ## SHARED SUBMIT INTERFACE API
@@ -481,6 +500,10 @@ class ApiServer:
         template = self.jinja.get_template (template_name)
         return self.response (template.render (context), mimetype="image/svg+xml")
 
+    def __render_css_template (self, template_name, **context):
+        template = self.jinja.get_template (template_name)
+        return self.response (template.render (context), mimetype="text/css")
+
     def __render_template (self, request, template_name, **context):
         template      = self.jinja.get_template (template_name)
         token         = self.token_from_cookie (request)
@@ -490,6 +513,7 @@ class ApiServer:
             "base_url":        self.base_url,
             "site_name":       self.site_name,
             "site_description": self.site_description,
+            "site_shorttag":   self.site_shorttag,
             "small_footer":    self.small_footer,
             "large_footer":    self.large_footer,
             "path":            request.path,
@@ -504,6 +528,7 @@ class ApiServer:
             "is_logged_in":    account is not None,
             "is_reviewing":    self.db.may_review (impersonator_token),
             "may_review":      self.db.may_review (token, account),
+            "may_review_integrity": self.db.may_review_integrity (token, account),
             "may_review_quotas": self.db.may_review_quotas (token, account),
             "may_administer":  self.db.may_administer (token, account),
             "may_query":       self.db.may_query (token, account),
@@ -700,18 +725,15 @@ class ApiServer:
         response.status_code = 410
         return response
 
-    def error_413 (self, request, quota_available=0, quota_total=None, quota_used=None, uploading_size=None):
+    def error_413 (self, request):
         """Procedure to respond with HTTP 413."""
         response = None
-        message = "Your storage space is insufficient. Please check your storage usage and quota on the dashboard. "
-        message += f"(quota={quota_total}, used={quota_used}, available={quota_available}, your file={uploading_size})."
+        message  = "You've reached your storage quota. "
+        message += "<a href=\"/my/dashboard\">Request more storage here</a>."
         if self.accepts_json (request):
-            response = self.response (json.dumps({
-                "message": message
-            }))
+            response = self.response (json.dumps({ "message": message }))
         else:
-            response = self.response (message,
-                                      mimetype="text/plain")
+            response = self.response (message, mimetype="text/plain")
         response.status_code = 413
         return response
 
@@ -1423,6 +1445,29 @@ class ApiServer:
             output += "Disallow: /\n"
 
         return self.response (output, mimetype="text/plain")
+
+    def colors_css (self, request):
+        """Implements /theme/colors.css."""
+
+        if not self.accepts_content_type (request, "text/css", strict=False):
+            return self.error_406 ("text/css")
+
+        return self.__render_css_template (
+            "colors.css",
+            primary_color           = self.colors['primary-color'],
+            primary_color_hover     = self.colors['primary-color-hover'],
+            primary_color_active    = self.colors['primary-color-active'],
+            footer_background_color = self.colors['footer-background-color'],
+            privilege_button_color  = self.colors['privilege-button-color'])
+
+    def loader_svg (self, request):
+        """Implements /theme/loader.svg."""
+
+        if not self.accepts_content_type (request, "image/svg+xml", strict=False):
+            return self.error_406 ("image/svg+xml")
+
+        return self.__render_svg_template ("loader.svg",
+            primary_color = self.colors["primary-color"])
 
     def ui_maintenance (self, request):
         """Implements a maintenance page."""
@@ -2699,6 +2744,23 @@ class ApiServer:
                                    "InvalidQuotaRequestUUIError")
 
         if self.db.update_quota_request (quota_request_uuid, status = status):
+            if status == "approved":
+                try:
+                    record = self.db.quota_requests (quota_request_uuid=quota_request_uuid)[0]
+                    subject = "Quota request approved"
+                    requested_size = int(record["requested_size"] / 1000000000)
+                    self.__send_templated_email ([record["email"]],
+                                                 subject,
+                                                 "quota_approved",
+                                                 title          = subject,
+                                                 email_address  = record["email"],
+                                                 first_name     = record["first_name"],
+                                                 requested_size = requested_size,
+                                                 base_url       = self.base_url,
+                                                 support_email  = self.support_email_address)
+                except (IndexError, KeyError):
+                    self.log.error ("Unable to send e-mail for quota request %s.",
+                                    quota_request_uuid)
             return redirect ("/admin/quota-requests", code=302)
 
         return self.error_500 ()
@@ -6449,6 +6511,25 @@ class ApiServer:
             subject = f"Dataset declined: {container_uuid}"
             self.__send_email_to_reviewers (subject, "declined_dataset_notification",
                                             dataset=dataset)
+
+            try:
+                # E-mail the datase owner.
+                account = self.db.account_by_uuid (dataset["account_uuid"])
+
+                # Retrieve the dataset again to get the DOIs.
+                dataset = self.db.datasets (dataset_uuid=dataset["uuid"],
+                                            is_published=None,
+                                            is_latest=None,
+                                            use_cache=False)[0]
+
+                self.__send_templated_email ([account["email"]], f"Declined: {dataset['title']}",
+                                             "dataset_declined",
+                                             base_url = self.base_url,
+                                             support_email = self.support_email_address,
+                                             title = dataset["title"])
+            except (TypeError, IndexError, KeyError):
+                self.log.error ("Unable to send decline e-mail for dataset: %s.", dataset["uuid"])
+
             return self.respond_201 ({
                 "location": f"{self.base_url}/review/overview"
             })
@@ -6507,6 +6588,24 @@ class ApiServer:
             subject = f"Dataset published: {container_uuid}"
             self.__send_email_to_reviewers (subject, "published_dataset_notification",
                                             dataset=dataset)
+
+            try:
+                # E-mail the datase owner.
+                account = self.db.account_by_uuid (dataset["account_uuid"])
+
+                # Retrieve the dataset again to get the DOIs.
+                dataset = self.db.datasets (dataset_uuid=dataset["uuid"], use_cache=False)[0]
+                self.__send_templated_email ([account["email"]], f"Approved: {dataset['title']}",
+                                             "dataset_approved",
+                                             base_url = self.base_url,
+                                             support_email = self.support_email_address,
+                                             title = dataset["title"],
+                                             container_uuid = dataset["container_uuid"],
+                                             versioned_doi = dataset["doi"],
+                                             container_doi = dataset["container_doi"])
+            except (TypeError, IndexError, KeyError):
+                self.log.error ("Unable to send approval e-mail for dataset: %s.", dataset["uuid"])
+
             return self.respond_201 ({
                 "location": f"{self.base_url}/review/published/{dataset_id}"
             })
@@ -6911,7 +7010,7 @@ class ApiServer:
         storage_used      = self.db.account_storage_used (account_uuid)
         storage_available = account["quota"] - storage_used
         if storage_available < 1:
-            return self.error_413 (request, 0)
+            return self.error_413 (request)
 
         try:
             dataset   = self.__dataset_by_id_or_uri (dataset_id,
@@ -6952,7 +7051,7 @@ class ApiServer:
             # multipart headings (~220 bytes per chunk).
             if storage_available < bytes_to_read:
                 self.log.error ("File upload failed because user's quota limit: quota(%d), used(%d), available(%s), filesize(%d)", account["quota"], storage_used, storage_available, bytes_to_read)
-                return self.error_413 (request, storage_available, account["quota"], storage_used, bytes_to_read)
+                return self.error_413 (request)
 
             input_stream = request.stream
 
@@ -7402,6 +7501,58 @@ class ApiServer:
         except validator.ValidationException as error:
             return self.error_400 (request, error.message, error.code)
 
+    def api_v3_admin_files_integrity_statistics (self, request):
+        """Implements /v3/admin/files-integrity-statistics."""
+
+        if not self.accepts_json (request):
+            return self.error_406 ("application/json")
+
+        token = self.token_from_cookie (request)
+        if not self.db.may_review_integrity (token):
+            return self.error_403 (request)
+
+        files = self.db.repository_file_statistics (extended_properties=True)
+        number_of_files = 0
+        number_of_inaccessible_files = 0
+        number_of_incomplete_metadata = 0
+        number_of_bytes = 0
+        number_of_links = 0
+        incomplete_metadata = []
+        missing_files = []
+
+        for entry in files:
+            if value_or (entry, "is_link_only", False):
+                number_of_links += 1
+                continue
+
+            number_of_files += 1
+            number_of_bytes += int(float(entry["bytes"]))
+
+            filesystem_location = self.__filesystem_location (entry)
+            if not filesystem_location:
+                number_of_incomplete_metadata += 1
+                incomplete_metadata.append (value_or (entry, "uuid", "unknown"))
+                continue
+
+            if not os.path.isfile (filesystem_location):
+                number_of_inaccessible_files += 1
+                missing_files.append (filesystem_location)
+
+        output = {
+            "number_of_links":              number_of_links,
+            "number_of_files":              number_of_files,
+            "number_of_bytes":              number_of_bytes,
+            "number_of_accessible_files":   number_of_files - number_of_inaccessible_files,
+            "number_of_inaccessible_files": number_of_inaccessible_files,
+            "number_of_incomplete_metadata": number_of_incomplete_metadata,
+            "percentage_accessible":        (1.0 - (number_of_inaccessible_files / number_of_files)) * 100,
+            "percentage_inaccessible":      number_of_inaccessible_files / number_of_files * 100,
+            "inaccessible_files":           missing_files,
+            "incomplete_metadata":          incomplete_metadata,
+        }
+
+        return self.response (json.dumps(output))
+
     def __git_create_repository (self, git_uuid):
         git_directory = f"{self.db.storage}/{git_uuid}.git"
         if not os.path.exists (git_directory):
@@ -7489,6 +7640,29 @@ class ApiServer:
             self.log.error ("The command was:\n---\n%s\n---", error.cmd)
             return self.error_500()
 
+    def api_v3_private_dataset_git_instructions (self, request, git_uuid):
+        """Implements an instruction page for /v3/datasets/<id>.git."""
+        handler = self.default_error_handling (request, "GET", "text/html")
+        if handler is not None:
+            return handler
+
+        if not validator.is_valid_uuid (git_uuid):
+            return self.error_404 (request)
+
+        try:
+            # Only consider published datasets to not reveal whether a UUID
+            # is reserved for a Git repository.
+            dataset = self.db.datasets (git_uuid     = git_uuid,
+                                        is_published = True,
+                                        is_latest    = None)[0]
+            git_repository_url = self.__git_repository_url_for_dataset (dataset)
+            return self.__render_template (request, "git_instructions.html",
+                                           git_repository_url = git_repository_url)
+        except IndexError:
+            pass
+
+        return self.error_404 (request)
+
     def api_v3_private_dataset_git_refs (self, request, git_uuid):
         """Implements /v3/datasets/<id>.git/<suffix>."""
 
@@ -7535,6 +7709,169 @@ class ApiServer:
             pass
 
         return self.error_403 (request)
+
+    def __git_contributors (self, git_repository):
+        """Returns a list of contributors including their commit statistics."""
+        history = git_repository.walk (git_repository.head.target,
+                                       pygit2.enums.SortMode.REVERSE)
+        commits = list(history)
+        if not commits:
+            return None
+
+        # Accounting for the initial commit.
+        previous_commit = commits[0]
+        stats = self.__git_files_by_type (previous_commit.tree)
+        total_lines = 0
+        for extension in stats:
+            for entry in stats[extension]:
+                total_lines += value_or (entry, "lines", 0)
+
+        contributors = {
+            previous_commit.author.email: {
+                "name": previous_commit.author.name,
+                "email": previous_commit.author.email,
+                "commits": 1,
+                "additions": total_lines,
+                "deletions": 0
+            }
+        }
+
+        # Walk the repository's history.
+        for commit in commits[1:]:
+            stats = git_repository.diff(previous_commit, commit).stats
+            if commit.author.email in contributors:
+                record = contributors[commit.author.email]
+                record["commits"] += 1
+                record["additions"] += stats.insertions
+                record["deletions"] += stats.deletions
+            else:
+                contributors[commit.author.email] = {
+                    "name": commit.author.name,
+                    "email": commit.author.email,
+                    "commits": 1,
+                    "additions": stats.insertions,
+                    "deletions": stats.deletions
+                }
+            previous_commit = commit
+
+        return list(contributors.values())
+
+    def __git_files_by_type (self, tree, path="", output=None):
+        """
+        Returns a dictionary with the file extension as key and the list of
+        file statistics as value for the git repository TREE.
+        """
+        if output is None:
+            output = {}
+
+        for entry in tree:
+            # Walk the directory tree
+            if isinstance (entry, pygit2.Tree):  # pylint: disable=no-member
+                self.__git_files_by_type (list(entry), f"{path}{entry.name}/", output)
+                continue
+
+            record = { "filename": f"{path}{entry.name}", "size": entry.size }
+
+            # Skip over binary files and large files.
+            if entry.is_binary or entry.size > 5000000:
+                extension = "binary" if entry.is_binary else "large-text-file"
+                if extension in output:
+                    output[extension].append(record)
+                else:
+                    output[extension] = [record]
+                continue
+
+            # Add line-count information
+            record["lines"] = entry.data.count(b'\n')
+
+            # We count newlines, but that would miss out on the last
+            # line without a newline.
+            if entry.data != b'' and entry.data[-1:] != b'\n':
+                record["lines"] += 1
+
+            _, extension = os.path.splitext (entry.name)
+            extension = "no-extension" if extension == "" else extension.lstrip(".").lower()
+            language = value_or_none (filetypes_by_extension, extension)
+            if language is None:
+                language = "Other"
+            if language in output:
+                output[language].append(record)
+            else:
+                output[language] = [record]
+
+        return output
+
+    def __git_statistics_error_handling (self, request, git_uuid):
+
+        if not validator.is_valid_uuid (git_uuid):
+            return self.error_400 (request, "Invalid UUID.", "InvalidGitUUIError"), None
+
+        if not self.db.datasets (git_uuid=git_uuid, is_published=None, is_latest=None):
+            self.log.error ("No dataset associated with Git repository '%s'.", git_uuid)
+            return self.error_404 (request), None
+
+        git_directory = f"{self.db.storage}/{git_uuid}.git"
+        if not os.path.exists (git_directory):
+            self.log.error ("No Git repository at '%s'", git_directory)
+            return self.error_404 (request), None
+
+        git_repository = pygit2.Repository (git_directory)
+        if git_repository is None:
+            self.log.error ("Could not open Git repository for '%s'.", git_uuid)
+            return self.error_404 (request), None
+
+        default_branch = self.__git_repository_default_branch_guess (git_repository)
+        if not default_branch:
+            self.log.error ("Expected default branch to be set for '%s'.", git_uuid)
+            return self.error_404 (request), None
+
+        return git_repository, default_branch
+
+    def api_v3_dataset_git_languages (self, request, git_uuid):
+        """Implements /v3/datasets/<id>/languages."""
+
+        git_repository, branch = self.__git_statistics_error_handling (request, git_uuid)
+        if isinstance (git_repository, Response):
+            return git_repository
+
+        tree = git_repository.revparse_single(branch).tree # pylint: disable=no-member
+        statistics = self.__git_files_by_type (tree)
+
+        # Drop the binary count from the statistics, because we only
+        # generate a summary with line counts below.
+        statistics.pop("binary", None)
+
+        summary = {}
+        for _, extension in enumerate (statistics):
+            num_bytes_for_extension = 0
+            for entry in statistics[extension]:
+                num_lines = value_or (entry, "lines", 0)
+                num_bytes = value_or (entry, "size", 0)
+                # Remove minified sources by the heuristic that the average
+                # line length must be smaller than 300 bytes long.  This seems
+                # to come close to how Github reports the statistics.
+                if num_lines > 0 and num_bytes / num_lines < 300:
+                    num_bytes_for_extension += num_bytes
+
+            summary[extension] = num_bytes_for_extension
+
+        sorted_summary = dict(sorted(summary.items(),
+                                     key=lambda item: item[1],
+                                     reverse=True))
+        return self.response (json.dumps (sorted_summary))
+
+    def api_v3_dataset_git_contributors (self, request, git_uuid):
+        """Implements /v3/datasets/<id>/contributors."""
+
+        git_repository, _ = self.__git_statistics_error_handling (request, git_uuid)
+        if isinstance (git_repository, Response):
+            return git_repository
+
+        contributors = self.__git_contributors (git_repository)
+        if contributors is None:
+            return self.error_404 (request)
+
+        return self.response (json.dumps(contributors))
 
     def api_v3_profile (self, request):
         """Implements /v3/profile."""
@@ -7725,6 +8062,22 @@ class ApiServer:
 
         return self.respond_204 ()
 
+    def api_v3_admin_accounts_clear_cache (self, request):
+        """Implements /v3/admin/accounts/clear-cache."""
+
+        handler = self.default_error_handling (request, "GET", "application/json")
+        if handler is not None:
+            return handler
+
+        token = self.token_from_cookie (request)
+        if not self.db.may_administer (token):
+            return self.error_403 (request)
+
+        self.log.info ("Invalidating accounts caches.")
+        self.db.cache.invalidate_by_prefix ("accounts")
+
+        return self.respond_204 ()
+
     def api_v3_datasets_assign_reviewer (self, request, dataset_uuid, reviewer_uuid):
         """Implements /v3/datasets/<id>/assign-reviewer/<rid>."""
 
@@ -7794,7 +8147,8 @@ class ApiServer:
         try:
             dataset = self.__dataset_by_id_or_uri (dataset_id, version=version)
             doi = dataset["container_doi"] if version is None else dataset["doi"]
-            return self.__render_svg_template ("badge.svg", doi=doi, version=version)
+            return self.__render_svg_template ("badge.svg", doi=doi, version=version,
+                                               color=self.colors["primary-color"])
         except KeyError:
             pass
 

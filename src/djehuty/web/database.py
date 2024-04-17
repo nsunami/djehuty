@@ -506,20 +506,30 @@ class SparqlInterface:
         query = self.__query_from_template ("datasets_missing_dois")
         return self.__run_query (query)
 
+    def repository_file_statistics (self, extended_properties=False, use_cache=False):
+        """Returns files and their sizes, and optionally more properties."""
+        query = self.__query_from_template ("statistics_files", {
+            "extended_properties": extended_properties
+        })
+
+        if use_cache:
+            return self.__run_query (query, query, "repository_statistics")
+
+        return self.__run_query (query)
+
     def repository_statistics (self):
         """Procedure to retrieve repository-wide statistics."""
 
         datasets_query    = self.__query_from_template ("statistics_datasets")
         collections_query = self.__query_from_template ("statistics_collections")
         authors_query     = self.__query_from_template ("statistics_authors")
-        files_query       = self.__query_from_template ("statistics_files")
 
         row = { "datasets": 0, "authors": 0, "collections": 0, "files": 0, "bytes": 0 }
         try:
             datasets    = self.__run_query (datasets_query, datasets_query, "repository_statistics")
             authors     = self.__run_query (authors_query, authors_query, "repository_statistics")
             collections = self.__run_query (collections_query, collections_query, "repository_statistics")
-            files       = self.__run_query (files_query, files_query, "repository_statistics")
+            files       = self.repository_file_statistics (use_cache=True)
             number_of_files = 0
             number_of_bytes = 0
             for entry in files:
@@ -1379,14 +1389,17 @@ class SparqlInterface:
         self.cache.invalidate_by_prefix ("accounts")
         return self.__run_logged_query (query)
 
-    def quota_requests (self, status=None):
+    def quota_requests (self, status=None, quota_request_uuid=None):
         """Procedure to return a list of quota requests."""
 
         status_uri = None
         if status is not None:
             status_uri = rdf.urify_value (rdf.DJHT[f"QuotaRequest{status.capitalize()}"])
 
-        query = self.__query_from_template ("quota_requests", { "status": status_uri })
+        query = self.__query_from_template ("quota_requests", {
+            "status": status_uri,
+            "quota_request_uuid": quota_request_uuid
+        })
         return self.__run_query (query)
 
     def update_account (self, account_uuid, active=None, email=None, job_title=None,
@@ -2021,12 +2034,14 @@ class SparqlInterface:
 
         collection_uuid = draft["uuid"]
         blank_node   = self.wrap_in_blank_node (collection_uuid, "collection")
+        current_time = datetime.strftime (datetime.now(), "%Y-%m-%dT%H:%M:%SZ")
         query        = self.__query_from_template ("publish_draft_collection", {
             "account_uuid":      account_uuid,
             "blank_node":        blank_node,
             "version":           new_version_number,
             "container_uuid":    container_uuid,
             "collection_uuid":   collection_uuid,
+            "timestamp":         current_time,
             "first_publication": not latest
         })
 
@@ -2139,11 +2154,13 @@ class SparqlInterface:
 
         dataset_uuid = draft["uuid"]
         blank_node   = self.wrap_in_blank_node (dataset_uuid, "dataset")
+        current_time = datetime.strftime (datetime.now(), "%Y-%m-%dT%H:%M:%SZ")
         query        = self.__query_from_template ("publish_draft_dataset", {
             "blank_node":        blank_node,
             "version":           new_version_number,
             "container_uuid":    container_uuid,
             "dataset_uuid":      dataset_uuid,
+            "timestamp":         current_time,
             "first_publication": not latest
         })
 
@@ -3195,6 +3212,11 @@ class SparqlInterface:
     def may_review_quotas (self, session_token, account=None):
         """Returns True when the session's account may handle storage requests."""
         return self.__may_execute_role (session_token, "review_quotas", account)
+
+    def may_review_integrity (self, session_token, account=None):
+        """Returns True when the session's account may view data integrity information."""
+        return (self.__may_execute_role (session_token, "administer", account) and
+                self.__may_execute_role (session_token, "review_integrity", account))
 
     def is_depositor (self, session_token):
         """Returns True when the account linked to the session is a depositor, False otherwise"""

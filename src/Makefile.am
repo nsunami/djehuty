@@ -47,6 +47,7 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/html_templates/categories.html                      \
     djehuty/web/resources/html_templates/category.html                        \
     djehuty/web/resources/html_templates/collection.html                      \
+    djehuty/web/resources/html_templates/colors.css                           \
     djehuty/web/resources/html_templates/dataset_access_request.html          \
     djehuty/web/resources/html_templates/dataset.html                         \
     djehuty/web/resources/html_templates/depositor/collection-private-links.html \
@@ -66,6 +67,10 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/html_templates/email/2fa_token.txt                  \
     djehuty/web/resources/html_templates/email/data_access_request.html       \
     djehuty/web/resources/html_templates/email/data_access_request.txt        \
+    djehuty/web/resources/html_templates/email/dataset_approved.html          \
+    djehuty/web/resources/html_templates/email/dataset_approved.txt           \
+    djehuty/web/resources/html_templates/email/dataset_declined.html          \
+    djehuty/web/resources/html_templates/email/dataset_declined.txt           \
     djehuty/web/resources/html_templates/email/dataset_submitted.html         \
     djehuty/web/resources/html_templates/email/dataset_submitted.txt          \
     djehuty/web/resources/html_templates/email/declined_dataset_notification.html \
@@ -75,13 +80,17 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/html_templates/email/layout.html                    \
     djehuty/web/resources/html_templates/email/published_dataset_notification.html \
     djehuty/web/resources/html_templates/email/published_dataset_notification.txt \
+    djehuty/web/resources/html_templates/email/quota_approved.html            \
+    djehuty/web/resources/html_templates/email/quota_approved.txt             \
     djehuty/web/resources/html_templates/email/quota_request.html             \
     djehuty/web/resources/html_templates/email/quota_request.txt              \
     djehuty/web/resources/html_templates/email/submitted_for_review_notification.html \
     djehuty/web/resources/html_templates/email/submitted_for_review_notification.txt \
     djehuty/web/resources/html_templates/feedback.html                        \
+    djehuty/web/resources/html_templates/git_instructions.html                \
     djehuty/web/resources/html_templates/institutions.html                    \
     djehuty/web/resources/html_templates/layout.html                          \
+    djehuty/web/resources/html_templates/loader.svg                           \
     djehuty/web/resources/html_templates/maintenance.html                     \
     djehuty/web/resources/html_templates/opendap_to_doi.html                  \
     djehuty/web/resources/html_templates/portal.html                          \
@@ -224,7 +233,6 @@ EXTRA_RESOURCES =                                                             \
     djehuty/web/resources/static/images/licenses/cc-by-nd.png                 \
     djehuty/web/resources/static/images/licenses/cc-by-sa.png                 \
     djehuty/web/resources/static/images/licenses/gnu-gpl-v3.png               \
-    djehuty/web/resources/static/images/loader.svg                            \
     djehuty/web/resources/static/images/logo.png                              \
     djehuty/web/resources/static/images/logo-delft.png                        \
     djehuty/web/resources/static/images/logo-eindhoven.png                    \

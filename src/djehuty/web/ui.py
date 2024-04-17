@@ -356,6 +356,7 @@ def read_privilege_configuration (server, xml_root, logger):
                 "may_impersonate": bool(int(config_value (account, "may-impersonate", None, False))),
                 "may_review":      bool(int(config_value (account, "may-review", None, False))),
                 "may_review_quotas": bool(int(config_value (account, "may-review-quotas", None, False))),
+                "may_review_integrity": bool(int(config_value (account, "may-review-integrity", None, False))),
                 "may_process_feedback": bool(int(config_value (account, "may-process-feedback", None, False))),
                 "may_receive_email_notifications": bool(int(config_value (account, "may-receive-email-notifications", None, True))),
                 "orcid":           orcid
@@ -450,6 +451,15 @@ def read_static_pages (static_pages, server, inside_reload, config_dir, logger):
             server.static_pages[uri_path] = {"redirect-to": redirect_to.text, "code": code}
             if not inside_reload:
                 logger.info ("Loaded redirect (%i): %s -> %s", code, uri_path, redirect_to.text)
+
+def read_colors_configuration (server, xml_root):
+    """Procedure to parse and set the color scheme configuration."""
+    colors = xml_root.find("colors")
+    if colors:
+        for color in ["primary-color", "primary-color-hover",
+                      "primary-color-active", "privilege-button-color",
+                      "footer-background-color"]:
+            server.colors[color] = config_value (colors, color, fallback=server.colors[color])
 
 def read_datacite_configuration (server, xml_root):
     """Procedure to parse and set the DataCite API configuration."""
@@ -671,6 +681,14 @@ def read_configuration_file (server, config_file, address, port, state_graph,
         if site_description is not None:
             server.site_description = site_description.text
 
+        site_shorttag = xml_root.find ("site-shorttag")
+        if site_shorttag is not None:
+            server.site_shorttag = site_shorttag.text
+
+        support_email_address = xml_root.find ("support-email-address")
+        if support_email_address is not None:
+            server.support_email_address = support_email_address.text
+
         read_orcid_configuration (server, xml_root)
         read_datacite_configuration (server, xml_root)
         read_email_configuration (server, xml_root, logger)
@@ -678,6 +696,7 @@ def read_configuration_file (server, config_file, address, port, state_graph,
         read_automatic_login_configuration (server, xml_root)
         read_privilege_configuration (server, xml_root, logger)
         read_quotas_configuration (server, xml_root)
+        read_colors_configuration (server, xml_root)
 
         for include_element in xml_root.iter('include'):
             include    = include_element.text
