@@ -174,6 +174,7 @@ class SparqlInterface:
         return self.__run_query (query)
 
     def __run_query (self, query, cache_key_string=None, prefix=None, retries=5):
+        self.log.info ("Running query.: %s", query)
 
         cache_key = None
         if cache_key_string is not None:
@@ -298,9 +299,80 @@ class SparqlInterface:
 
         return self.__run_query (query)
 
-    def __search_query_to_sparql_filters (self, search_for, search_filters):
+    def __search_query_to_sparql_filters_v2 (self, search_for, search_format):
         """
-        Procedure to convert search queries to SPARQL FILTER statements.
+        Procedure to parse v2 search queries and return SPARQL FILTER statements.
+        """
+
+        filters = ""
+        if search_for is None:
+            return filters
+
+        if isinstance (search_for, str):
+            # turn into list for loop purposes
+            search_for = [search_for]
+        if dict in list(map(type, search_for)):
+            filters += "FILTER ("
+            last_used_field = None
+            for element in search_for:
+                if (isinstance (element, dict)
+                    and len(element.items()) == 1
+                    and next(iter(element)) == "operator"):
+                    if element['operator'] == "(":
+                        filters += " ( "
+                        continue
+                    if element['operator'] == ")":
+                        filters += " ) "
+                    filters += f" {element['operator']} "
+                # This is a case that a search term comes after field search
+                # :tag: maize processing -> tag:maize || tag:processing
+                # :tag: maize AND processing -> tag:maize && tag:processing
+                elif isinstance (element, str):
+                    if last_used_field is None:
+                        continue
+                    escaped_value = rdf.escape_string_value (element.lower())
+                    filters += f"CONTAINS(LCASE(?{last_used_field}), {escaped_value})\n"
+                    continue
+                else:
+                    filter_list = []
+                    for key, value in element.items():
+                        if value == "":
+                            continue
+                        escaped_value = rdf.escape_string_value (value.lower())
+                        filter_list.append(f"CONTAINS(LCASE(?{key}), {escaped_value})\n")
+                        last_used_field = key
+                    if filter_list:
+                        filters += (f"({' || '.join(filter_list)})")
+            filters += ")"
+
+            # Post-construction heuristical query fixing
+            # It's undocumented because it needs to be replaced.
+            filters = filters.replace("FILTER ( || ", "FILTER (")
+            filters = filters.replace(")CONTAINS", ") || CONTAINS")
+            filters = filters.replace(")\nCONTAINS", ") || CONTAINS")
+            filters = filters.replace(")(", ") || (")
+            filters = filters.replace(")  )", ")")
+        else:
+            filter_list = []
+            for search_term in search_for:
+                search_term_safe = rdf.escape_string_value (search_term.lower())
+
+                # should be the same as ApiServer.ui_search()'s fields.
+                fields = ["title", "resource_title", "description", "tag", "organizations"]
+                for field in fields:
+                    filter_list.append(f"       CONTAINS(LCASE(?{field}),          {search_term_safe})")
+
+                if search_format:
+                    filter_list.append(f"       CONTAINS(LCASE(?format),         {search_term_safe})")
+            if len(filter_list) > 0:
+                filters += f"FILTER({' || '.join(filter_list)})"
+
+        return filters
+
+
+    def __search_query_to_sparql_filters_v3 (self, search_for, search_filters):
+        """
+        Procedure to convert v3 search queries to SPARQL FILTER statements.
         """
 
         filters = ""
@@ -352,8 +424,9 @@ class SparqlInterface:
                   exclude_ids=None, groups=None, handle=None, institution=None,
                   is_latest=False, item_type=None, limit=None, modified_since=None,
                   offset=None, order=None, order_direction=None, published_since=None,
-                  resource_doi=None, return_count=False, search_for=None, search_filters=None,
-                  version=None, is_published=True, is_under_review=None, git_uuid=None,
+                  resource_doi=None, return_count=False, search_for=None,
+                  search_format=False, search_filters=None, version=None,
+                  is_published=True, is_under_review=None, git_uuid=None,
                   private_link_id_string=None, use_cache=True, is_restricted=None,
                   is_embargoed=None, is_software=None):
         """Procedure to retrieve version(s) of datasets."""
@@ -373,7 +446,14 @@ class SparqlInterface:
         filters += rdf.sparql_filter ("private_link_id_string", private_link_id_string, escape=True)
         filters += rdf.sparql_in_filter ("group_id",    groups)
         filters += rdf.sparql_in_filter ("dataset_id", exclude_ids, negate=True)
-        filters += self.__search_query_to_sparql_filters (search_for, search_filters)
+
+        self.log.info("search_filters: %s", search_filters)
+        if search_filters is None:
+            filters += self.__search_query_to_sparql_filters_v2 (search_for, search_format)
+        else:
+            self.log.info("v3")
+            filters += self.__search_query_to_sparql_filters_v3 (search_for, search_filters)
+
         if is_software is not None:
             if is_software:
                 filters += rdf.sparql_filter ("defined_type_name", "software", escape=True)

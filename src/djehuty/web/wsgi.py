@@ -310,6 +310,7 @@ class ApiServer:
             ## ----------------------------------------------------------------
             R("/v3/datasets",                                                    self.api_v3_datasets),
             R("/v3/datasets/codemeta",                                           self.api_v3_datasets_codemeta),
+            R("/v3/datasets/search",                                             self.api_v3_datasets_search),
             R("/v3/datasets/top/<item_type>",                                    self.api_v3_datasets_top),
             R("/v3/datasets/<dataset_id>/submit-for-review",                     self.api_v3_dataset_submit),
             R("/v3/datasets/<dataset_id>/publish",                               self.api_v3_dataset_publish),
@@ -934,8 +935,8 @@ class ApiServer:
         record["item_type"]       = self.get_parameter (request, "item_type")
         record["doi"]             = self.get_parameter (request, "doi")
         record["handle"]          = self.get_parameter (request, "handle")
-        record["search_for"]      = self.get_parameter (request, "search_for")
-        record["search_filters"]  = self.get_parameter (request, "search_filters")
+        record["search_for"]      = self.parse_search_terms(self.get_parameter (request, "search_for"))
+        record["search_format"]   = self.get_parameter (request, "search_format")
         record["categories"]      = split_delimited_string(self.get_parameter (request, "categories"), ",")
         record["is_latest"]       = self.get_parameter (request, "is_latest")
 
@@ -953,9 +954,13 @@ class ApiServer:
         validator.integer_value (record, "item_type")
         validator.string_value  (record, "doi",             maximum_length=255)
         validator.string_value  (record, "handle",          maximum_length=255)
-        validator.string_value  (record, "search_for",      maximum_length=1024)
+        validator.boolean_value (record, "search_format")
         validator.boolean_value (record, "is_latest")
-        validator.search_filters(record["search_filters"])
+
+        try:
+            validator.string_value (record, "search_for",      maximum_length=1024)
+        except validator.InvalidValueType:
+            validator.array_value  (record, "search_for" )
 
         if "categories" in record and record["categories"] is not None:
             for category_id in record["categories"]:
@@ -6100,6 +6105,64 @@ class ApiServer:
         except validator.ValidationException as error:
             return self.error_400 (request, error.message, error.code)
 
+    def api_v3_datasets_search (self, request):
+        """Implements /v3/datasets/search."""
+        handler = self.default_error_handling (request, "POST", "application/json")
+        if handler is not None:
+            return handler
+
+        parameters = request.get_json()
+
+        try:
+            record = {}
+            record["order"]           = self.get_parameter (parameters, "order")
+            record["order_direction"] = self.get_parameter (parameters, "order_direction")
+            record["institution"]     = self.get_parameter (parameters, "institution")
+            record["published_since"] = self.get_parameter (parameters, "published_since")
+            record["modified_since"]  = self.get_parameter (parameters, "modified_since")
+            record["group"]           = self.get_parameter (parameters, "group")
+            record["resource_doi"]    = self.get_parameter (parameters, "resource_doi")
+            record["item_type"]       = self.get_parameter (parameters, "item_type")
+            record["doi"]             = self.get_parameter (parameters, "doi")
+            record["handle"]          = self.get_parameter (parameters, "handle")
+            record["search_for"]      = self.get_parameter (parameters, "search_for")
+            record["search_filters"]  = self.get_parameter (parameters, "search_filters")
+            record["categories"]      = split_delimited_string(self.get_parameter (parameters, "categories"), ",")
+            record["is_latest"]       = self.get_parameter (parameters, "is_latest")
+
+            offset, limit = self.__paging_offset_and_limit (parameters)
+            record["offset"] = offset
+            record["limit"]  = limit
+
+            validator.string_value   (record, "order", 0, 32)
+            validator.order_direction (record, "order_direction")
+            validator.integer_value  (record, "institution")
+            validator.string_value   (record, "published_since", maximum_length=32)
+            validator.string_value   (record, "modified_since",  maximum_length=32)
+            validator.integer_value  (record, "group")
+            validator.string_value   (record, "resource_doi",    maximum_length=255)
+            validator.integer_value  (record, "item_type")
+            validator.string_value   (record, "doi",             maximum_length=255)
+            validator.string_value   (record, "handle",          maximum_length=255)
+            validator.string_value   (record, "search_for",      maximum_length=1024)
+            validator.boolean_value  (record, "is_latest")
+            validator.search_filters (record["search_filters"])
+
+            if "categories" in record and record["categories"] is not None:
+                for category_id in record["categories"]:
+                    validator.integer_value (record, "category_id", category_id)
+
+            # Rewrite the group parameter to match the database's plural form.
+            record["groups"]  = [record["group"]] if record["group"] is not None else None
+            del record["group"]
+
+            records = self.db.datasets (**record)
+            return self.default_list_response (records, formatter.format_dataset_record,
+                                               base_url = self.base_url)
+
+        except validator.ValidationException as error:
+            return self.error_400 (request, error.message, error.code)
+
     def __api_v3_datasets_parameters (self, request, item_type):
         record = {}
         record["dataset_id"]      = self.get_parameter (request, "id")
@@ -8033,6 +8096,85 @@ class ApiServer:
                     contr_dict['orcid'] = parts[1][:-1]
                 contributors.append(contr_dict)
         return contributors
+
+    def parse_search_terms (self, search_for):
+        """Procedure to parse search terms and operators in a string"""
+        if not isinstance(search_for, str):
+            return search_for
+
+        search_for = search_for.strip()
+        operators_mapping = {"(":"(", ")":")", "AND":"&&", "OR":"||"}
+        operators = operators_mapping.keys()
+
+        fields = ["title", "resource_title", "description",
+                  "format", "tag", "organizations"]
+        re_field = ":(" + "|".join(fields+["search_term"]) + "):"
+
+        search_tokens = re.findall(r'[^" ]+|"[^"]+"|\([^)]+\)', search_for)
+        search_tokens = [s.strip('"') for s in search_tokens]
+        has_operators = any((operator in search_for) for operator in operators)
+        has_fieldsearch = re.search(re_field, search_for) is not None
+
+        # Concatenate field name and its following token as one token.
+        for idx, token in enumerate(search_tokens):
+            if token is None:
+                continue
+            if re.search(re_field, token) is not None:
+                matched = re.split(':', token)[1::2][0]
+                if matched in fields:
+                    try:
+                        search_tokens[idx] = f"{token} {search_tokens[idx+1]}"
+                        search_tokens[idx+1] = None
+                    except IndexError:
+                        return search_for
+
+        search_tokens = [x for x in search_tokens if x is not None]
+
+        ## Unpacking this construction to replace AND and OR for &&
+        ## and || results in a query where && is stripped out.
+        if has_operators:
+            is_parenthesized = False
+            lparen_count = search_tokens.count("(")
+            rparen_count = search_tokens.count(")")
+            if lparen_count > 0 and lparen_count == rparen_count:
+                is_parenthesized = True
+            for idx, element in enumerate(search_tokens):
+                if element in operators:
+                    if element in ['(', ')'] and not is_parenthesized:
+                        continue
+                    search_tokens[idx] = {"operator": operators_mapping[element]}
+        else:
+            # No operators found in the search query. Adding OR operators.
+            index = -1
+            while len(search_tokens) + index > 0:
+                search_tokens.insert(index, {"operator": "||"})
+                index = index - 2
+
+        for idx, search_term in enumerate(search_tokens):
+            if isinstance(search_term, dict):
+                continue
+
+            if re.search(re_field, search_term) is not None:
+                field_name = re.split(':', search_term)[1::2][0]
+                value = list(filter(None, [s.strip() for s in re.split(':', search_term)[0::2]]))[0]
+
+                if field_name in fields:
+                    search_tokens[idx] = {field_name: value}
+                elif field_name == "search_term":
+                    search_dict = {}
+                    for field_name in fields:
+                        search_dict[field_name] = value
+                    search_tokens[idx] = search_dict
+
+                field_name = None
+
+            elif has_fieldsearch is False:
+                search_dict = {}
+                for field in fields:
+                    search_dict[field] = search_term
+                search_tokens[idx] = search_dict
+
+        return search_tokens
 
     def add_names_to_authors (self, authors):
         """Procedure to add missing first_name and last_name to author dict"""

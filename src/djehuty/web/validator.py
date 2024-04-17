@@ -221,7 +221,7 @@ def search_filters (value, error_list=None):
                                     field_name = "search_filters",
                                     message = "Invalid value in 'scopes'.",
                                     code    = "InvalidValue"))
-        if k == "formats":
+        elif k == "formats":
             for elem in v:
                 string_value ({ "value": elem }, "value", 1, 20, required=True)
 

@@ -408,7 +408,7 @@ function load_search_filters_from_url() {
 }
 
 function load_search_results() {
-    let api_dataset_url    = "/v2/articles/search";
+    let api_dataset_url    = "/v3/datasets/search";
     let api_collection_url = "/v2/collections/search";
     let request_params     = parse_url_params();
     let search_filters     = {};
