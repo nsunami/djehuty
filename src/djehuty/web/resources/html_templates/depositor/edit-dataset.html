@@ -69,6 +69,8 @@ jQuery(document).ready(function (){
 .upload-container:hover { cursor: pointer; }
 .upload-container p { font-size: 1.2em; }
 .file-incomplete-warning { font-style: italic; color: red; }
+table#files tbody tr td:nth-child(2) { min-width: 260px; }
+table#files tbody tr td:nth-child(3) { width: 15px; text-align: right; }
 #collaborators-form input[type="text"] {
   width: 790px;
   background: #fff;
@@ -121,11 +123,11 @@ jQuery(document).ready(function (){
 #restricted_access_form { display: none; }
 #file-upload h4 { font-size: 1.5em; padding: 0em; margin: .75em 0em .75em 0em; }
 #categories-wrapper .subitem-checkbox { margin-left: 3em; }
-#new-author { text-align: center; line-height: 3.5em; height: 3.5em; }
+#new-author, #update-author { text-align: center; line-height: 3.5em; height: 3.5em; }
 #new-funding { text-align: center; line-height: 3.5em; height: 3.5em; }
-#new-author-form { padding: 1em; }
-#new-author-form label { background: #eee; }
-#new-author-form input[type="text"] { width: 800pt; }
+#new-author-form, #author-inline-edit-form td { padding: 1em; }
+#new-author-form label, #author-inline-edit-form label { background: #eee; }
+#new-author-form input[type="text"], #author-inline-edit-form input[type="text"] { width: 800pt; }
 #new-funding-form { padding: 1em; }
 #new-funding-form label { background: #eee; }
 #new-funding-form input[type="text"] { width: 800pt; }
@@ -230,7 +232,7 @@ jQuery(document).ready(function (){
 <input type="text" id="authors" name="authors" />
 <table class="inside-form-table multi-list" id="authors-list">
   <thead>
-    <tr><th>Author</th><th>Actions</th></tr>
+    <tr><th>Author</th><th colspan="2">Actions</th></tr>
   </thead>
   <tbody></tbody>
 </table>
@@ -246,8 +248,8 @@ jQuery(document).ready(function (){
     <thead>
       <tr>
         <th colspan="1" scope="colgroup">Collaborator</th>
-        <th colspan="2" scope="colgroup">Metadata</th>
-        <th colspan="3" scope="colgroup">Files</th>
+        <th colspan="2" scope="colgroup">Metadata<div class="fas fa-question-circle help-icon"><span class="help-text">Refers to all the fields on this page</span></div></th>
+        <th colspan="3" scope="colgroup">Files<div class="fas fa-question-circle help-icon"><span class="help-text">Refers to the uploaded files</span></div></th>
         <th colspan="1" scope="colgroup"></th>
       </tr>
       <tr>
@@ -403,7 +405,7 @@ jQuery(document).ready(function (){
 {% include 'depositor/language-selector.html' %}
 <label for="time_coverage">Time coverage</label><div class="fas fa-question-circle help-icon"><span class="help-text">Indicate the dates to which the data refer. Enter the year, or the beginning and ending date.</span></div>
 <input type="text" id="time_coverage" name="time_coverage" value="{{article["time_coverage"] | default("", True)}}" />
-<label>Geolocation</label>
+<label>Geolocation</label><div class="fas fa-question-circle help-icon"><span class="help-text">When your dataset covers geographical data, fill in the following section </span></div>
 <div id="geolocation-wrapper">
   <label for="geolocation">Name</label><div class="fas fa-question-circle help-icon"><span class="help-text">The geographic area to which the data refer (e.g. municipality, town/city, region, country)</span></div>
   <input type="text" id="geolocation" name="geolocation" placeholder="Example: Dam Square, Amsterdam" value="{{article["geolocation"] | default("", True)}}" />
@@ -465,6 +467,9 @@ jQuery(document).ready(function (){
   <pre>
 git push {{site_shorttag}} --all
 git push {{site_shorttag}} --tags</pre>
+  <p>When publishing a newer version of this dataset in the future, the Git <code>remote</code> location will be reset.
+    So when your dataset has been published, remove the remote:</p>
+  <pre>git remote remove 4tu</pre>
   <h4 class="corporate-identity-h4">Git repository files and branches <span class="no-select"> &nbsp;<a id="refresh-git-files" href="#" class="fas fa-sync"></a></span></h4>
   <label>Git default branch</label><div class="fas fa-question-circle help-icon"><span class="help-text">The selected branch will be the branch a user is in after pulling the Git repository.</span></div>
   <select id="git-branches">
@@ -514,5 +519,8 @@ git push {{site_shorttag}} --tags</pre>
 <label class="no-head" for="publish_agreement">I agree that my dataset will be published once
   the review is complete.</label><span class="required-field">&#8727;</span>
 </div>
+{%- if not article.is_shared_with_me or permissions.metadata_edit %}
+<a class="hide-for-javascript save-button button"id="save_bottom" href="#">Save draft</a>
+{%- endif %}
 </div>
 {% endblock %}

@@ -9,34 +9,6 @@
 <style>
 #access-request-wrapper { display: none; }
 #content-wrapper {padding: 0}
-#content-wrapper input[type="text"],
-#content-wrapper input[type="datetime-local"],
-#content-wrapper input[type="date"],
-#content-wrapper textarea, .texteditor {
-    display: block;
-    padding: .7em;
-    border: solid 1pt #aaa;
-    border-radius: 0em .5em .5em .5em;
-    width: 832pt;
-    margin-top: 0em;
-    margin-bottom: 1em;
-    font-size: 13pt;
-}
-.texteditor {
-    padding: 0em !important;
-    border-radius: 0em 0em .5em .5em !important;
-    resize: vertical;
-    font-size: 1.0em;
-    width: 852pt;
-}
-#content-wrapper label {
-    display: inline-block;
-    background: #ffeecc;
-    color: #000;
-    padding: .5em .5em .25em .5em;
-    border-radius: .5em .5em 0em 0em;
-    font-weight: bold;
-}
 </style>
 {% endblock %}
 
@@ -66,7 +38,6 @@
        </div>
 {% elif item.is_restricted %}
     <h3>DATA - restricted access</h3>
-{# test 12999575 #}
         <div id="limited_access">
             <h4>Reason</h4>
     {% autoescape false %}
@@ -85,7 +56,6 @@
         </div>
         {% include 'dataset_access_request.html' %}
 {% elif item.is_metadata_record %}
-{# test 18586031 #}
     <h3>DATA - not available</h3>
         <div id="metadata_only">
     {% if item.metadata_reason %}
@@ -105,7 +75,6 @@
 {% endif %}
 {% if is_own_item or private_view or not(item.is_restricted or item.is_embargoed) %}
 {% if services %}
-{# test 12717890 #}
     <div id="services">
         <div class="label">data service</div>
         <ul>
@@ -116,7 +85,6 @@
     </div>
 {% endif%}
 {% if opendap %}
-{# test 17122553 #}
     <div id="opendap">
         <div class="label">OPeNDAP data service</div>
         <ul>
@@ -136,7 +104,6 @@
     </div>
 {%- endif %}
 {% if files %}
-{# test 16545714 #}
     <div id="files">
         <div class="label">files ({{files|length}})</div>
         <ul>

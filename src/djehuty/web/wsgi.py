@@ -338,6 +338,8 @@ class ApiServer:
             R("/v3/datasets/<dataset_id>.git/branches",                          self.api_v3_dataset_git_branches),
             R("/v3/datasets/<dataset_id>.git/set-default-branch",                self.api_v3_datasets_git_set_default_branch),
             R("/v3/file/<file_id>",                                              self.api_v3_file),
+            R("/v3/datasets/<container_uuid>/authors",                           self.api_v3_dataset_authors),
+            R("/v3/datasets/<container_uuid>/authors/<author_uuid>",             self.api_v3_dataset_authors),
             R("/v3/datasets/<dataset_id>/references",                            self.api_v3_dataset_references),
             R("/v3/collections/<collection_id>/references",                      self.api_v3_collection_references),
             R("/v3/datasets/<dataset_id>/tags",                                  self.api_v3_dataset_tags),
@@ -352,6 +354,7 @@ class ApiServer:
             R("/v3/datasets/<dataset_uuid>/collaborators",                       self.api_v3_dataset_collaborators),
             R("/v3/datasets/<dataset_uuid>/collaborators/<collaborator_uuid>",   self.api_v3_dataset_remove_collaborator),
             R("/v3/accounts/search",                                             self.api_v3_accounts_search),
+            R("/v3/authors/<author_uuid>",                                       self.api_v3_author_details),
 
             ## Data model exploratory
             ## ----------------------------------------------------------------
@@ -508,34 +511,44 @@ class ApiServer:
         template      = self.jinja.get_template (template_name)
         token         = self.token_from_cookie (request)
         account       = self.db.account_by_session_token (token)
-        impersonator_token = self.__impersonator_token (request)
         parameters    = {
-            "base_url":        self.base_url,
-            "site_name":       self.site_name,
-            "site_description": self.site_description,
-            "site_shorttag":   self.site_shorttag,
-            "small_footer":    self.small_footer,
-            "large_footer":    self.large_footer,
-            "path":            request.path,
-            "in_production":   self.in_production,
-            "maintenance_mode": self.maintenance_mode,
-            "sandbox_message": self.sandbox_message,
+            "base_url":            self.base_url,
+            "identity_provider":   self.identity_provider,
+            "in_production":       self.in_production,
+            "is_logged_in":        account is not None,
+            "large_footer":        self.large_footer,
+            "maintenance_mode":    self.maintenance_mode,
+            "menu":                self.menu,
+            "orcid_client_id":     self.orcid_client_id,
+            "orcid_endpoint":      self.orcid_endpoint,
+            "path":                request.path,
+            "sandbox_message":     self.sandbox_message,
             "sandbox_message_css": self.sandbox_message_css,
-            "identity_provider": self.identity_provider,
-            "orcid_client_id": self.orcid_client_id,
-            "orcid_endpoint":  self.orcid_endpoint,
-            "session_token":   self.token_from_request (request),
-            "is_logged_in":    account is not None,
-            "is_reviewing":    self.db.may_review (impersonator_token),
-            "may_review":      self.db.may_review (token, account),
-            "may_review_integrity": self.db.may_review_integrity (token, account),
-            "may_review_quotas": self.db.may_review_quotas (token, account),
-            "may_administer":  self.db.may_administer (token, account),
-            "may_query":       self.db.may_query (token, account),
-            "may_impersonate":  self.db.may_impersonate (token, account),
-            "impersonating_account": self.__impersonating_account (request),
-            "menu":            self.menu,
+            "site_description":    self.site_description,
+            "site_name":           self.site_name,
+            "site_shorttag":       self.site_shorttag,
+            "small_footer":        self.small_footer,
         }
+        if account is None:
+            parameters = { **parameters,
+                "session_token": None,
+                "impersonating_account": None,
+                "is_reviewing": None
+            }
+        else:
+            impersonator_token = self.__impersonator_token (request)
+            parameters = { **parameters,
+                "impersonating_account": self.__impersonating_account (request),
+                "is_reviewing":          self.db.may_review (impersonator_token),
+                "may_administer":        self.db.may_administer (token, account),
+                "may_impersonate":       self.db.may_impersonate (token, account),
+                "may_query":             self.db.may_query (token, account),
+                "may_review":            self.db.may_review (token, account),
+                "may_review_integrity":  self.db.may_review_integrity (token, account),
+                "may_review_quotas":     self.db.may_review_quotas (token, account),
+                "session_token":         self.token_from_request (request),
+            }
+
         return self.response (template.render({ **context, **parameters }),
                               mimetype='text/html')
 
@@ -4290,7 +4303,7 @@ class ApiServer:
                     embargo_type    = validator.options_value (record, "embargo_type", validator.embargo_types),
                     embargo_title   = validator.string_value  (record, "embargo_title", 0, 1000),
                     embargo_reason  = validator.string_value  (record, "embargo_reason", 0, 10000),
-                    eula            = validator.string_value  (record, "eula", 0, 10000),
+                    eula            = validator.string_value  (record, "eula", 0, 50000),
                     defined_type_name = defined_type_name,
                     defined_type    = defined_type,
                     agreed_to_deposit_agreement = validator.boolean_value (record, "agreed_to_deposit_agreement", False, False),
@@ -4345,15 +4358,20 @@ class ApiServer:
                 if error_response is not None:
                     return error_response
 
-                authors = self.db.authors (item_uri   = dataset["uri"],
-                                           account_uuid = account_uuid,
-                                           is_published = False,
-                                           item_type  = "dataset",
-                                           limit      = 10000)
+                authors = self.db.authors (
+                    item_uri     = dataset["uri"],
+                    account_uuid = account_uuid,
+                    is_published = False,
+                    item_type    = "dataset",
+                    limit        = validator.integer_value (request.args, "limit"),
+                    order        = validator.string_value (request.args, "order", 0, 32),
+                    order_direction = validator.order_direction (request.args, "order_direction"))
 
                 return self.default_list_response (authors, formatter.format_author_record)
-            except (IndexError, KeyError, TypeError):
-                pass
+            except (IndexError, KeyError, TypeError) as error:
+                self.log.error ("Unable to retrieve authors: %s", error)
+            except validator.ValidationException as error:
+                return self.error_400 (request, error.message, error.code)
 
             return self.error_500 ()
 
@@ -6132,6 +6150,92 @@ class ApiServer:
         return self.default_list_response (records, formatter.format_dataset_record,
                                            base_url = self.base_url)
 
+    def api_v3_dataset_authors (self, request, container_uuid, author_uuid=None):
+        """Implements /v3/datasets/<uuid>/authors[/<author_uuid>]."""
+
+        if not validator.is_valid_uuid (container_uuid):
+            return self.error_404 (request)
+
+        if author_uuid is not None and not validator.is_valid_uuid (container_uuid):
+            return self.error_404 (request)
+
+        account_uuid = self.default_authenticated_error_handling (request, "GET",
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
+
+        try:
+            dataset = self.db.datasets (container_uuid = container_uuid,
+                                        account_uuid   = account_uuid,
+                                        is_published   = False,
+                                        is_latest      = False,
+                                        limit          = 1)[0]
+
+            _, error_response = self.__needs_collaborative_permissions (
+                account_uuid, request, "dataset", dataset, "metadata_read")
+            if error_response is not None:
+                return error_response
+
+            authors = self.db.authors (
+                item_uri     = dataset["uri"],
+                account_uuid = account_uuid,
+                author_uuid  = author_uuid,
+                is_published = False,
+                item_type    = "dataset",
+                limit        = validator.integer_value (request.args, "limit"),
+                order        = validator.string_value (request.args, "order", 0, 32),
+                order_direction = validator.order_direction (request.args, "order_direction"))
+
+            if author_uuid is not None:
+                return self.response (json.dumps(formatter.format_author_record_v3 (authors[0])))
+
+            return self.default_list_response (authors, formatter.format_author_record_v3)
+        except (IndexError, KeyError, TypeError) as error:
+            self.log.error ("Unable to retrieve authors: %s", error)
+
+        return self.error_500 ()
+
+    def api_v3_author_details (self, request, author_uuid):
+        """Implements /v3/authors/<author_uuid>."""
+
+        if not validator.is_valid_uuid (author_uuid):
+            return self.error_404 (request)
+
+        account_uuid = self.default_authenticated_error_handling (request,
+                                                                  ["GET", "PUT"],
+                                                                  "application/json")
+        if isinstance (account_uuid, Response):
+            return account_uuid
+
+        if request.method in  ("GET", "HEAD"):
+            try:
+                author = self.db.authors (author_uuid = author_uuid)[0]
+                if author is None:
+                    return self.error_404 (request)
+                return self.response (json.dumps(formatter.format_author_record_v3 (author)))
+            except IndexError:
+                return self.error_404 (request)
+
+        if request.method == "PUT":
+            record = request.get_json()
+            try:
+                parameters = {
+                    "first_name": validator.string_value (record, "first_name", 0, 255),
+                    "last_name":  validator.string_value (record, "last_name", 0, 255),
+                    "email":      validator.string_value (record, "email", 0, 255),
+                    "orcid":      validator.string_value (record, "orcid", 0, 255)
+                }
+
+                if not self.db.update_author (author_uuid, account_uuid, **parameters):
+                    return self.error_500 ()
+
+                return self.respond_204 ()
+
+            except validator.ValidationException as error:
+                return self.error_400 (request, error.message, error.code)
+
+        return self.error_405 (["GET", "PUT"])
+
     def api_v3_datasets_codemeta (self, request):
         """Implements /v3/datasets/codemeta."""
 
@@ -6508,10 +6612,6 @@ class ApiServer:
 
         container_uuid = dataset["container_uuid"]
         if self.db.decline_dataset (container_uuid, account_uuid):
-            subject = f"Dataset declined: {container_uuid}"
-            self.__send_email_to_reviewers (subject, "declined_dataset_notification",
-                                            dataset=dataset)
-
             try:
                 # E-mail the datase owner.
                 account = self.db.account_by_uuid (dataset["account_uuid"])
@@ -6521,12 +6621,18 @@ class ApiServer:
                                             is_published=None,
                                             is_latest=None,
                                             use_cache=False)[0]
+                subject = f"Declined: {dataset['title']}"
+                parameters = {
+                    "base_url": self.base_url,
+                    "support_email": self.support_email_address,
+                    "title": dataset["title"]
+                }
+                self.__send_templated_email ([account["email"]], subject,
+                                             "dataset_declined", **parameters)
 
-                self.__send_templated_email ([account["email"]], f"Declined: {dataset['title']}",
-                                             "dataset_declined",
-                                             base_url = self.base_url,
-                                             support_email = self.support_email_address,
-                                             title = dataset["title"])
+                self.__send_email_to_reviewers (subject, "declined_dataset_notification",
+                                                dataset=dataset, account_email = account["email"],
+                                                **parameters)
             except (TypeError, IndexError, KeyError):
                 self.log.error ("Unable to send decline e-mail for dataset: %s.", dataset["uuid"])
 
@@ -6585,26 +6691,31 @@ class ApiServer:
                     return self.error_500 ()
 
         if self.db.publish_dataset (container_uuid, account_uuid):
-            subject = f"Dataset published: {container_uuid}"
-            self.__send_email_to_reviewers (subject, "published_dataset_notification",
-                                            dataset=dataset)
-
             try:
                 # E-mail the datase owner.
                 account = self.db.account_by_uuid (dataset["account_uuid"])
 
                 # Retrieve the dataset again to get the DOIs.
                 dataset = self.db.datasets (dataset_uuid=dataset["uuid"], use_cache=False)[0]
-                self.__send_templated_email ([account["email"]], f"Approved: {dataset['title']}",
-                                             "dataset_approved",
-                                             base_url = self.base_url,
-                                             support_email = self.support_email_address,
-                                             title = dataset["title"],
-                                             container_uuid = dataset["container_uuid"],
-                                             versioned_doi = dataset["doi"],
-                                             container_doi = dataset["container_doi"])
-            except (TypeError, IndexError, KeyError):
-                self.log.error ("Unable to send approval e-mail for dataset: %s.", dataset["uuid"])
+                subject = f"Approved: {dataset['title']}"
+                parameters = {
+                    "base_url": self.base_url,
+                    "support_email": self.support_email_address,
+                    "title": dataset["title"],
+                    "container_uuid": dataset["container_uuid"],
+                    "versioned_doi": value_or_none (dataset, "doi"),
+                    "container_doi": dataset["container_doi"]
+                }
+                self.__send_templated_email ([account["email"]], subject,
+                                             "dataset_approved", **parameters)
+
+                self.__send_email_to_reviewers (subject, "published_dataset_notification",
+                                                dataset=dataset, account_email = account["email"],
+                                                **parameters)
+
+            except (TypeError, IndexError, KeyError) as error:
+                self.log.error ("Unable to send approval e-mail for dataset %s: %s.",
+                                dataset["uuid"], error)
 
             return self.respond_201 ({
                 "location": f"{self.base_url}/review/published/{dataset_id}"
@@ -6825,7 +6936,7 @@ class ApiServer:
                 "embargo_type":       validator.options_value (record, "embargo_type", validator.embargo_types, is_temporary_embargo, errors),
                 "embargo_title":      validator.string_value  (record, "embargo_title", 0, 1000, is_embargoed, errors),
                 "embargo_reason":     validator.string_value  (record, "embargo_reason", 0, 10000, is_embargoed, errors),
-                "eula":               validator.string_value  (record, "eula", 0, 10000, is_restricted, errors),
+                "eula":               validator.string_value  (record, "eula", 0, 50000, is_restricted, errors),
                 "defined_type_name":  dataset_type,
                 "defined_type":       defined_type,
                 "agreed_to_deposit_agreement": agreed_to_deposit_agreement,

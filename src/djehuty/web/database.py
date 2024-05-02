@@ -255,6 +255,12 @@ class SparqlInterface:
             return query
         return rdf.insert_query (self.state_graph, graph)
 
+    def __last_item_by_order_index (self, results):
+        try:
+            return max(results, key = lambda item: item["order_index"])
+        except (ValueError, KeyError):
+            return None
+
     ## ------------------------------------------------------------------------
     ## GET METHODS
     ## ------------------------------------------------------------------------
@@ -636,7 +642,8 @@ class SparqlInterface:
                  is_public=None, job_title=None, last_name=None,
                  orcid_id=None, url_name=None, limit=10, order="order_index",
                  order_direction="asc", item_uri=None, search_for=None,
-                 account_uuid=None, item_type="dataset", is_published=True):
+                 account_uuid=None, item_type="dataset", is_published=True,
+                 author_uuid=None):
         """Procedure to retrieve authors of a dataset."""
 
         prefix = item_type.capitalize()
@@ -666,6 +673,7 @@ class SparqlInterface:
             "is_published": is_published,
             "item_uri":    item_uri,
             "account_uuid": account_uuid,
+            "author_uuid": author_uuid,
             "filters":     filters
         })
         query += rdf.sparql_suffix (order, order_direction, limit, None)
@@ -1734,11 +1742,12 @@ class SparqlInterface:
             # In the case where there are already files in the dataset,
             # we can append to the last blank node.
             if existing_files:
-                last_file = existing_files[-1]
-                new_index = conv.value_or (last_file, "order_index", 0) + 1
-                if new_index < 1:
-                    self.log.error ("Expected larger index for to-be-appended file.")
+                last_file = self.__last_item_by_order_index (existing_files)
+                if last_file is None:
+                    self.log.error ("Unable to find file to append to (%s)", file_uri)
+                    return None
 
+                new_index = conv.value_or (last_file, "order_index", 0) + 1
                 last_node = conv.value_or_none (last_file, "originating_blank_node")
                 new_node  = self.wrap_in_blank_node (file_uri, index=new_index)
                 if new_node is None:
@@ -1859,10 +1868,18 @@ class SparqlInterface:
         if self.add_triples_from_graph (graph):
             existing_collaborators = self.collaborators (dataset_uuid)
             if existing_collaborators:
-                last_collaborator = existing_collaborators [-1]
+                last_collaborator = self.__last_item_by_order_index (existing_collaborators)
+                if last_collaborator is None:
+                    self.log.error ("Unable to find collaborator to append to (%s)",
+                                    collaborator_uri)
+                    return None
+
                 last_node = conv.value_or_none(last_collaborator, "originating_blank_node")
-                new_index = conv.value_or (last_collaborator, "order_index", 0) +1
+                new_index = conv.value_or (last_collaborator, "order_index", 0) + 1
                 new_node = self.wrap_in_blank_node(collaborator_uri, index=new_index)
+                if new_node is None:
+                    self.log.error ("Failed preparation to append %s.", collaborator_uri)
+                    return None
 
                 if self.append_to_list(last_node, new_node):
                     return rdf.uri_to_uuid (collaborator_uri)
@@ -1921,10 +1938,20 @@ class SparqlInterface:
         if self.add_triples_from_graph (graph):
             item_uri    = rdf.uuid_to_uri (item_uuid, item_type)
             existing_links = self.private_links (item_uri=item_uri, account_uuid=account_uuid)
-            existing_links = list(map (lambda item: URIRef(rdf.uuid_to_uri(item["uuid"], "private_link")),
-                                               existing_links))
+            if existing_links:
+                last_link = self.__last_item_by_order_index (existing_links)
+                if last_link is None:
+                    self.log.error ("Unable to find link to append to (%s)", link_uri)
 
-            new_links    = existing_links + [URIRef(link_uri)]
+                last_node = conv.value_or_none (last_link, "originating_blank_node")
+                new_index = conv.value_or (last_link, "order_index", 0) + 1
+                new_node  = self.wrap_in_blank_node (link_uri, index=new_index)
+                if new_node is None:
+                    self.log.error ("Failed preparation to append %s.", collaborator_uri)
+                    return None
+
+                if self.append_to_list (last_node, new_node):
+                    return link_uri
 
             item = None
             if item_type == "dataset":
@@ -1946,12 +1973,13 @@ class SparqlInterface:
                                               limit        = 1)[0]
 
             if item is None:
-                self.log.error ("Could not find item to insert a private link for.")
+                self.log.error ("Could not find item to insert a private link %s for.",
+                                link_uri)
                 return None
 
             if self.update_item_list (item["uuid"],
                                       account_uuid,
-                                      new_links,
+                                      [URIRef(link_uri)],
                                       "private_links"):
                 return link_uri
 
@@ -2285,6 +2313,27 @@ class SparqlInterface:
             return draft_uuid
 
         return None
+
+    def update_author (self, author_uuid, created_by, first_name, last_name, email, orcid):
+        """Update the author record identified by AUTHOR_UUID, CREATED_BY."""
+
+        full_name = None
+        if first_name is not None and last_name is not None:
+            full_name = f"{first_name} {last_name}"
+
+        current_time = datetime.strftime (datetime.now(), "%Y-%m-%dT%H:%M:%S")
+        query = self.__query_from_template ("update_author", {
+            "author_uuid": author_uuid,
+            "created_by": created_by,
+            "full_name": rdf.escape_string_value (full_name),
+            "first_name": rdf.escape_string_value (first_name),
+            "last_name": rdf.escape_string_value (last_name),
+            "email": rdf.escape_string_value (email),
+            "orcid": rdf.escape_string_value (self.__normalize_orcid (orcid)),
+            "modified_date": rdf.escape_datetime_value (current_time)
+        })
+
+        return self.__run_query (query)
 
     def update_dataset (self, dataset_uuid, account_uuid, title=None,
                         description=None, resource_doi=None, doi=None,
